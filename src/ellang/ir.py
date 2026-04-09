@@ -50,6 +50,7 @@ class ExecutionPlan:
     suggested_tests: list[dict[str, object]] = field(default_factory=list)
     typed_program: Any | None = None
     bytecode: Any | None = None
+    backend_prototypes: dict[str, str] = field(default_factory=dict)
     replay_schema_version: str = "ellang-replay-v1"
 
     def node_map(self) -> dict[str, IRNode]:

@@ -51,6 +51,7 @@ class BytecodeProgram:
     runtime: dict[str, object] = field(default_factory=dict)
     ffi_bindings: list[dict[str, object]] = field(default_factory=list)
     exported_types: dict[str, object] = field(default_factory=dict)
+    backend_prototypes: dict[str, str] = field(default_factory=dict)
 
     def to_serializable(self) -> dict[str, object]:
         return {
@@ -67,6 +68,7 @@ class BytecodeProgram:
             "runtime": self.runtime,
             "ffi_bindings": self.ffi_bindings,
             "exported_types": self.exported_types,
+            "backend_prototypes": self.backend_prototypes,
         }
 
     def write_json(self, path: str | Path) -> Path:
@@ -105,6 +107,7 @@ class BytecodeLowerer:
             },
             ffi_bindings=[asdict(item) for item in typed_program.ffi_bindings],
             exported_types={name: _type_spec_to_dict(spec) for name, spec in typed_program.exported_types.items()},
+            backend_prototypes={},
         )
 
 

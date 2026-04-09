@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .backend_prototypes import emit_backend_prototypes
 from .ir import ExecutionPlan, IREdge, IRNode, NodeKind
 from .models import BackendResult, LocalModelBackend, QwenLocalBackend
 from .optimizer import GraphOptimizer
@@ -70,6 +71,9 @@ class Compiler:
         plan.suggested_tests = synthesizer.synthesize(spec, plan)
         plan.typed_program = typed_program
         plan.bytecode = bytecode
+        plan.backend_prototypes = emit_backend_prototypes(bytecode)
+        plan.bytecode.backend_prototypes = dict(plan.backend_prototypes)
+        plan.diagnostics.append("Generated concrete WASM and JVM backend prototypes from stable bytecode.")
 
         optimizer = self.optimizer or GraphOptimizer()
         optimized_plan, report = optimizer.optimize(plan)

@@ -208,6 +208,9 @@ class IdeationEngine:
         elif "level order" in lower and "tree" in lower:
             project = {"algorithm_family": "tree_graph", "algorithm_task": "binary_tree_level_order"}
             flow = [EmitStep("result")]
+        elif "right side view" in lower and "tree" in lower:
+            project = {"algorithm_family": "tree_graph", "algorithm_task": "binary_tree_right_side_view"}
+            flow = [EmitStep("result")]
         elif "number of islands" in lower or "num islands" in lower:
             project = {"algorithm_family": "tree_graph", "algorithm_task": "num_islands"}
             flow = [EmitStep("result")]
@@ -216,6 +219,9 @@ class IdeationEngine:
             flow = [EmitStep("result")]
         elif "subsets" in lower:
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "subsets"}
+            flow = [EmitStep("result")]
+        elif "longest increasing subsequence" in lower or "lis" in lower:
+            project = {"algorithm_family": "dp_backtracking", "algorithm_task": "longest_increasing_subsequence"}
             flow = [EmitStep("result")]
         elif any(token in lower for token in ("sort", "top", "highest", "rank")):
             dataset_name = next(iter(inputs.keys()), "items")
@@ -299,6 +305,7 @@ def main() -> int:
         "bytecode_instructions": len(plan.bytecode.instructions) if plan.bytecode else 0,
         "vm_backend": result.vm_backend,
         "replay": result.replay,
+        "backend_prototypes": plan.backend_prototypes,
         "flowchart": mermaid_flowchart(plan),
         "tracechart": mermaid_trace(result.trace) if result.trace else "",
     }

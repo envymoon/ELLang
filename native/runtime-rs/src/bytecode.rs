@@ -33,6 +33,12 @@ pub struct FfiBinding {
     pub library: String,
     #[serde(default = "default_abi")]
     pub abi: String,
+    #[serde(default)]
+    pub args: serde_json::Value,
+    #[serde(default)]
+    pub returns: serde_json::Value,
+    #[serde(default)]
+    pub required_capabilities: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +53,8 @@ pub struct Program {
     pub ffi_bindings: Vec<FfiBinding>,
     #[serde(default)]
     pub exported_types: serde_json::Value,
+    #[serde(default)]
+    pub backend_prototypes: serde_json::Value,
 }
 
 pub type Bindings = HashMap<String, serde_json::Value>;

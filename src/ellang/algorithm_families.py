@@ -21,9 +21,11 @@ def execute_algorithm_family(family: str, task: str, bindings: dict[str, Any]) -
         ("stack_queue_heap", "top_k_frequent"): _top_k_frequent,
         ("linked_list", "reverse_list"): _reverse_list,
         ("tree_graph", "binary_tree_level_order"): _binary_tree_level_order,
+        ("tree_graph", "binary_tree_right_side_view"): _binary_tree_right_side_view,
         ("tree_graph", "num_islands"): _num_islands,
         ("dp_backtracking", "coin_change"): _coin_change,
         ("dp_backtracking", "subsets"): _subsets,
+        ("dp_backtracking", "longest_increasing_subsequence"): _longest_increasing_subsequence,
     }
     solver = registry.get((family, task))
     if solver is None:
@@ -134,6 +136,11 @@ def _num_islands(bindings: dict[str, Any]) -> int:
     return islands
 
 
+def _binary_tree_right_side_view(bindings: dict[str, Any]) -> list[Any]:
+    levels = _binary_tree_level_order(bindings)
+    return [level[-1] for level in levels if level]
+
+
 def _coin_change(bindings: dict[str, Any]) -> int:
     coins = [int(item) for item in bindings.get("coins", [])]
     amount = int(bindings.get("amount", 0))
@@ -152,3 +159,15 @@ def _subsets(bindings: dict[str, Any]) -> list[list[Any]]:
     for value in nums:
         result.extend([subset + [value] for subset in result])
     return result
+
+
+def _longest_increasing_subsequence(bindings: dict[str, Any]) -> int:
+    nums = [int(item) for item in bindings.get("nums", [])]
+    if not nums:
+        return 0
+    dp = [1] * len(nums)
+    for i in range(len(nums)):
+        for j in range(i):
+            if nums[j] < nums[i]:
+                dp[i] = max(dp[i], dp[j] + 1)
+    return max(dp)

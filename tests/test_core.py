@@ -10,7 +10,7 @@ from ellang.runtime import ExecutionEngine
 from ellang.syntax import parse_program, parse_program as parse_rendered_program
 from ellang.typed_ir import Capability, ResourceBudget, RuntimeTarget, ValueType
 from ellang.verifier import typed_program_from_dict, lower_to_bytecode
-from ellang.vm import ReferenceVM
+from ellang.vm import NativeVMHost, ReferenceVM
 from ellang.security import RuntimeQuota
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -360,6 +360,81 @@ class CoreRuntimeTests(unittest.TestCase):
         plan = Compiler().compile(parse_rendered_program(drafted.source))
         result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"coins": [1, 2, 5], "amount": 11})
         self.assertEqual(result.value, 3)
+
+    def test_algorithm_family_tree_right_side_view(self) -> None:
+        drafted = IdeationEngine().ideate("Return the binary tree right side view.", {"root": [1, 2, 3, None, 5, None, 4]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"root": [1, 2, 3, None, 5, None, 4]})
+        self.assertEqual(result.value, [1, 3, 4])
+
+    def test_algorithm_family_longest_increasing_subsequence(self) -> None:
+        drafted = IdeationEngine().ideate("Return the length of the longest increasing subsequence.", {"nums": [10, 9, 2, 5, 3, 7, 101, 18]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [10, 9, 2, 5, 3, 7, 101, 18]})
+        self.assertEqual(result.value, 4)
+
+    def test_compiler_generates_backend_prototypes(self) -> None:
+        spec = parse_program(
+            """
+            program "proto_demo"
+            intent "Sort students by score descending and return the top 2"
+            input students: dataset
+            output result: dataset
+            constraint deterministic = true
+            """
+        )
+        plan = Compiler().compile(spec)
+        self.assertIn("wasm", plan.backend_prototypes)
+        self.assertIn("jvm", plan.backend_prototypes)
+        self.assertIn("(module", plan.backend_prototypes["wasm"])
+        self.assertIn(".class public", plan.backend_prototypes["jvm"])
+
+    @unittest.skipUnless((REPO_ROOT / "native" / "runtime-rs" / "target" / "release" / "ellang-runtime.exe").exists(), "native runtime executable is not built")
+    def test_native_ffi_registry_executes_with_quota(self) -> None:
+        program = BytecodeProgram(
+            program_name="ffi_demo",
+            instructions=[
+                Instruction(OpCode.LOAD_INPUT, {"node_id": "input.main"}, ValueType.RECORD),
+                Instruction(
+                    OpCode.CALL_FFI,
+                    {
+                        "node_id": "ffi.call",
+                        "source": "message",
+                        "ffi_signature": {
+                            "name": "ellang_native.uppercase",
+                            "library": "ellang_native",
+                            "abi": "prototype",
+                            "required_capabilities": ["ffi.call"],
+                        },
+                    },
+                    ValueType.STRING,
+                ),
+                Instruction(OpCode.OUTPUT, {"node_id": "output.main", "source": "ffi.call"}, ValueType.STRING),
+            ],
+            runtime={
+                "target": "native",
+                "jit_tier": "baseline",
+                "aot_enabled": True,
+                "hot_threshold": 1,
+                "cross_platform_targets": ["native", "wasm", "jvm"],
+                "budget": {"max_ffi_calls": 1},
+            },
+            ffi_bindings=[
+                {
+                    "name": "ellang_native.uppercase",
+                    "library": "ellang_native",
+                    "abi": "prototype",
+                    "required_capabilities": ["ffi.call"],
+                }
+            ],
+        )
+        host = NativeVMHost(
+            executable=str(REPO_ROOT / "native" / "runtime-rs" / "target" / "release" / "ellang-runtime.exe"),
+            workspace_root=str(REPO_ROOT),
+        )
+        result = host.execute(program, {"message": "ellang"}, RuntimeQuota(ResourceBudget(max_ffi_calls=1)))
+        self.assertEqual(result.output, "ELLANG")
+        self.assertTrue(any("FFI calls used: 1" in item for item in result.diagnostics))
 
 
 if __name__ == "__main__":

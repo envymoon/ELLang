@@ -170,11 +170,8 @@ class ReferenceVM:
                     return _execute_structured_program(deserialize_program(payload), bindings)
             return _call_intrinsic(intrinsic, source)
         if opcode == OpCode.CALL_FFI:
-            return {
-                "ffi_signature": operand.get("ffi_signature", {}),
-                "status": "reference_stub",
-                "result": _resolve_source_or_last(operand, state, bindings),
-            }
+            signature = operand.get("ffi_signature", {})
+            return _call_ffi(signature if isinstance(signature, dict) else {}, _resolve_source_or_last(operand, state, bindings))
         if opcode == OpCode.SPLIT_EQUAL_WORDS:
             source = _resolve_source_or_last(operand, state, bindings)
             size = int(operand.get("chunk_size", 1))
@@ -373,11 +370,36 @@ def _summarize(value: Any) -> str:
 
 
 def _call_intrinsic(intrinsic: str, source: Any) -> Any:
-    if intrinsic == "dataset.len" and isinstance(source, list):
-        return len(source)
-    if intrinsic == "record.keys" and isinstance(source, dict):
-        return list(source.keys())
+    registry = {
+        "dataset.len": lambda value: len(value) if isinstance(value, list) else None,
+        "record.keys": lambda value: list(value.keys()) if isinstance(value, dict) else [],
+    }
+    if intrinsic in registry:
+        return registry[intrinsic](source)
     return {"intrinsic": intrinsic, "status": "reference_stub", "value": source}
+
+
+def _call_ffi(signature: dict[str, Any], source: Any) -> Any:
+    name = str(signature.get("name", ""))
+    required_capabilities = [str(item) for item in signature.get("required_capabilities", ["ffi.call"])]
+    if "ffi.call" not in required_capabilities:
+        raise PermissionError(f"FFI signature {name!r} is missing ffi.call capability.")
+    registry = {
+        "ellang_native.identity": lambda value: value,
+        "ellang_native.keys": lambda value: list(value.keys()) if isinstance(value, dict) else [],
+        "ellang_native.len": lambda value: len(value) if isinstance(value, (list, dict, str)) else 0,
+        "ellang_native.uppercase": lambda value: str(value).upper(),
+    }
+    if name not in registry:
+        raise ValueError(f"Unknown reference FFI binding: {name}")
+    return {
+        "ffi": {
+            "name": name,
+            "library": signature.get("library", ""),
+            "abi": signature.get("abi", "system"),
+        },
+        "result": registry[name](source),
+    }
 
 
 class _ReturnSignal(Exception):

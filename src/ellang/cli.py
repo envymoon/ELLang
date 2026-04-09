@@ -53,6 +53,7 @@ def main() -> int:
         "bytecode_instructions": len(plan.bytecode.instructions) if plan.bytecode else 0,
         "vm_backend": result.vm_backend,
         "replay": result.replay,
+        "backend_prototypes": plan.backend_prototypes,
         "flowchart": mermaid_flowchart(plan),
         "tracechart": mermaid_trace(result.trace) if result.trace else "",
     }

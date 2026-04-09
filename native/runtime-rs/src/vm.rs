@@ -1,5 +1,5 @@
-use crate::bytecode::{Bindings, Program};
-use crate::ffi::describe_bindings;
+use crate::bytecode::{Bindings, FfiBinding, Program};
+use crate::ffi::invoke_binding;
 use crate::jit::JitCompiler;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -17,11 +17,26 @@ pub struct VmResult {
 
 pub struct Vm;
 
+#[derive(Debug, Default)]
+struct VmQuotaState {
+    max_ffi_calls: u64,
+    ffi_calls_used: u64,
+}
+
 impl Vm {
     pub fn execute(program: &Program, bindings: &Bindings, workspace_root: &str) -> Result<VmResult, String> {
         let mut state: HashMap<String, Value> = HashMap::new();
         let mut trace: Vec<Value> = Vec::new();
         let mut last_value = Value::Null;
+        let mut quotas = VmQuotaState {
+            max_ffi_calls: program
+                .runtime
+                .budget
+                .get("max_ffi_calls")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            ffi_calls_used: 0,
+        };
         let hot_path = JitCompiler::compile_hot_path(program)?;
         for instruction in &program.instructions {
             let pc = trace.len();
@@ -31,7 +46,16 @@ impl Vm {
                 .and_then(Value::as_str)
                 .ok_or_else(|| "instruction missing node_id".to_string())?
                 .to_string();
-            let value = execute_instruction(&instruction.opcode, &instruction.operand, &state, &last_value, bindings, workspace_root)?;
+            let value = execute_instruction(
+                &instruction.opcode,
+                &instruction.operand,
+                &state,
+                &last_value,
+                bindings,
+                workspace_root,
+                &program.ffi_bindings,
+                &mut quotas,
+            )?;
             trace.push(json!({
                 "pc": pc,
                 "node_id": node_id,
@@ -60,6 +84,7 @@ impl Vm {
                 format!("AOT enabled: {}", program.runtime.aot_enabled),
                 format!("Cross-platform targets: {}", program.runtime.cross_platform_targets.join(", ")),
                 format!("FFI bindings registered: {}", program.ffi_bindings.len()),
+                format!("FFI calls used: {}", quotas.ffi_calls_used),
             ],
             trace,
         })
@@ -73,6 +98,8 @@ fn execute_instruction(
     last_value: &Value,
     bindings: &Bindings,
     workspace_root: &str,
+    ffi_bindings: &[FfiBinding],
+    quotas: &mut VmQuotaState,
 ) -> Result<Value, String> {
     match opcode {
         "load_input" => Ok(json!(bindings)),
@@ -205,18 +232,10 @@ fn execute_instruction(
         }
         "call_intrinsic" => {
             let intrinsic = operand.get("intrinsic").and_then(Value::as_str).unwrap_or("unknown");
-            match intrinsic {
-                "execute_algorithm_family" => execute_algorithm_family(operand, bindings),
-                "execute_structured_program" => execute_structured_program(operand, bindings),
-                _ => Ok(call_intrinsic(intrinsic, operand, state, last_value, bindings)),
-            }
+            Ok(call_intrinsic(intrinsic, operand, state, last_value, bindings))
         }
         "call_ffi" => {
-            let signature = operand.get("ffi_signature").cloned().unwrap_or(Value::Null);
-            Ok(json!({
-                "ffi": signature,
-                "bindings": describe_bindings(&[])
-            }))
+            execute_ffi_call(operand, state, last_value, bindings, ffi_bindings, quotas)
         }
         "loop" => {
             Ok(resolve_source_or_last(operand, state, last_value, bindings))
@@ -509,23 +528,68 @@ fn call_intrinsic(
     last_value: &Value,
     bindings: &Bindings,
 ) -> Value {
-    match intrinsic {
-        "dataset.len" => {
-            let source = resolve_source_or_last(operand, state, last_value, bindings);
-            match source {
-                Value::Array(items) => json!(items.len()),
-                _ => Value::Null,
-            }
-        }
-        "record.keys" => {
-            let source = resolve_source_or_last(operand, state, last_value, bindings);
-            match source {
-                Value::Object(map) => json!(map.keys().cloned().collect::<Vec<_>>()),
-                _ => Value::Array(vec![]),
-            }
-        }
-        _ => json!({"intrinsic": intrinsic, "status": "stubbed"}),
+    match intrinsic_registry().get(intrinsic) {
+        Some(handler) => match handler(operand, state, last_value, bindings) {
+            Ok(value) => value,
+            Err(err) => json!({"intrinsic": intrinsic, "status": "error", "message": err}),
+        },
+        None => json!({"intrinsic": intrinsic, "status": "stubbed"}),
     }
+}
+
+type IntrinsicHandler = fn(&Value, &HashMap<String, Value>, &Value, &Bindings) -> Result<Value, String>;
+
+fn intrinsic_registry() -> HashMap<&'static str, IntrinsicHandler> {
+    HashMap::from([
+        ("dataset.len", intrinsic_dataset_len as IntrinsicHandler),
+        ("record.keys", intrinsic_record_keys as IntrinsicHandler),
+        ("execute_algorithm_family", intrinsic_execute_algorithm_family as IntrinsicHandler),
+        ("execute_structured_program", intrinsic_execute_structured_program as IntrinsicHandler),
+    ])
+}
+
+fn intrinsic_dataset_len(
+    operand: &Value,
+    state: &HashMap<String, Value>,
+    last_value: &Value,
+    bindings: &Bindings,
+) -> Result<Value, String> {
+    let source = resolve_source_or_last(operand, state, last_value, bindings);
+    match source {
+        Value::Array(items) => Ok(json!(items.len())),
+        _ => Ok(Value::Null),
+    }
+}
+
+fn intrinsic_record_keys(
+    operand: &Value,
+    state: &HashMap<String, Value>,
+    last_value: &Value,
+    bindings: &Bindings,
+) -> Result<Value, String> {
+    let source = resolve_source_or_last(operand, state, last_value, bindings);
+    match source {
+        Value::Object(map) => Ok(json!(map.keys().cloned().collect::<Vec<_>>())),
+        _ => Ok(Value::Array(vec![])),
+    }
+}
+
+fn intrinsic_execute_algorithm_family(
+    operand: &Value,
+    _state: &HashMap<String, Value>,
+    _last_value: &Value,
+    bindings: &Bindings,
+) -> Result<Value, String> {
+    execute_algorithm_family(operand, bindings)
+}
+
+fn intrinsic_execute_structured_program(
+    operand: &Value,
+    _state: &HashMap<String, Value>,
+    _last_value: &Value,
+    bindings: &Bindings,
+) -> Result<Value, String> {
+    execute_structured_program(operand, bindings)
 }
 
 fn execute_algorithm_family(operand: &Value, bindings: &Bindings) -> Result<Value, String> {
@@ -544,9 +608,11 @@ fn execute_algorithm_family(operand: &Value, bindings: &Bindings) -> Result<Valu
         ("stack_queue_heap", "top_k_frequent") => Ok(execute_top_k_frequent(bindings)),
         ("linked_list", "reverse_list") => Ok(execute_reverse_list(bindings)),
         ("tree_graph", "binary_tree_level_order") => Ok(execute_binary_tree_level_order(bindings)),
+        ("tree_graph", "binary_tree_right_side_view") => Ok(execute_binary_tree_right_side_view(bindings)),
         ("tree_graph", "num_islands") => Ok(execute_num_islands(bindings)),
         ("dp_backtracking", "coin_change") => Ok(execute_coin_change(bindings)),
         ("dp_backtracking", "subsets") => Ok(execute_subsets(bindings)),
+        ("dp_backtracking", "longest_increasing_subsequence") => Ok(execute_longest_increasing_subsequence(bindings)),
         _ => Err(format!("unsupported algorithm family task: {family}/{task}")),
     }
 }
@@ -766,6 +832,21 @@ fn execute_binary_tree_level_order(bindings: &Bindings) -> Value {
     Value::Array(result.into_iter().map(Value::Array).collect())
 }
 
+fn execute_binary_tree_right_side_view(bindings: &Bindings) -> Value {
+    match execute_binary_tree_level_order(bindings) {
+        Value::Array(levels) => Value::Array(
+            levels
+                .into_iter()
+                .filter_map(|level| match level {
+                    Value::Array(items) => items.last().cloned(),
+                    _ => None,
+                })
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
 fn execute_num_islands(bindings: &Bindings) -> Value {
     let grid = bindings
         .get("grid")
@@ -852,6 +933,29 @@ fn execute_subsets(bindings: &Bindings) -> Value {
     Value::Array(result.into_iter().map(Value::Array).collect())
 }
 
+fn execute_longest_increasing_subsequence(bindings: &Bindings) -> Value {
+    let nums = bindings
+        .get("nums")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_i64())
+        .collect::<Vec<_>>();
+    if nums.is_empty() {
+        return Value::Number(0.into());
+    }
+    let mut dp = vec![1i64; nums.len()];
+    for i in 0..nums.len() {
+        for j in 0..i {
+            if nums[j] < nums[i] {
+                dp[i] = dp[i].max(dp[j] + 1);
+            }
+        }
+    }
+    Value::Number(dp.into_iter().max().unwrap_or(0).into())
+}
+
 fn compare_numeric(left: Value, right: Value) -> i8 {
     let lhs = left.as_f64().unwrap_or(0.0);
     let rhs = right.as_f64().unwrap_or(0.0);
@@ -879,4 +983,44 @@ fn neighbors(row: usize, col: usize, rows: usize, cols: usize) -> Vec<(usize, us
         out.push((row, col - 1));
     }
     out
+}
+
+fn execute_ffi_call(
+    operand: &Value,
+    state: &HashMap<String, Value>,
+    last_value: &Value,
+    bindings: &Bindings,
+    ffi_bindings: &[FfiBinding],
+    quotas: &mut VmQuotaState,
+) -> Result<Value, String> {
+    if quotas.max_ffi_calls == 0 {
+        return Err("ffi call denied by runtime quota".to_string());
+    }
+    if quotas.ffi_calls_used >= quotas.max_ffi_calls {
+        return Err("ffi quota exceeded".to_string());
+    }
+    let signature = operand
+        .get("ffi_signature")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "call_ffi missing ffi_signature".to_string())?;
+    let name = signature
+        .get("name")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "ffi signature missing name".to_string())?;
+    let binding = ffi_bindings
+        .iter()
+        .find(|candidate| candidate.name == name)
+        .ok_or_else(|| format!("ffi binding not registered: {name}"))?;
+    let input = resolve_source_or_last(operand, state, last_value, bindings);
+    quotas.ffi_calls_used += 1;
+    invoke_binding(binding, &input).map(|value| {
+        json!({
+            "ffi": {
+                "name": binding.name,
+                "library": binding.library,
+                "abi": binding.abi,
+            },
+            "result": value
+        })
+    })
 }
