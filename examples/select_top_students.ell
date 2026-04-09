@@ -1,0 +1,23 @@
+program "select_top_students"
+intent "Select the top 2 students by score"
+
+input students: dataset
+input top_only: bool
+output result: dataset
+
+constraint deterministic = true
+
+object Student:
+  field name: string
+  field score: number
+
+module rank_students:
+  intent "Order students by score from high to low"
+  use "sort students by score descending"
+
+flow:
+  use module rank_students
+  if top_only == true:
+    use "sort students by score descending and return the top 2"
+  else:
+    emit students

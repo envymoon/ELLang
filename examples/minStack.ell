@@ -1,0 +1,49 @@
+program "MinStackProgram"
+intent "Implement a stack that supports push, pop, top, and getMin in O(1) time"
+
+input operations: list
+input values: list
+output result: list
+
+constraint deterministic = true
+
+object MinStack:
+  field stack: list
+  field min_stack: list
+
+module push(value):
+  append value to stack
+  if min_stack is empty OR value <= current minimum:
+    append value to min_stack
+
+module pop:
+  if top of stack == top of min_stack:
+    remove last(min_stack)
+  remove last(stack)
+
+module top:
+  return last(stack)
+
+module getMin:
+  return last(min_stack)
+
+flow:
+  initialize MinStack
+  loop op in operations:
+    if op == "MinStack":
+      append null to results
+    else:
+      if op == "push":
+        call push(values[next])
+        append null to results
+      else:
+        if op == "pop":
+          call pop()
+          append null to results
+        else:
+          if op == "top":
+            append call top() to results
+          else:
+            if op == "getMin":
+              append call getMin() to results
+  emit results

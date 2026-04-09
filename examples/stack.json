@@ -1,0 +1,4 @@
+{
+"operations": ["MinStack","push","push","push","getMin","pop","top","getMin"],
+"values": [null,-2,0,-3,null,null,null,null]
+}

@@ -1,0 +1,9 @@
+{
+  "students": [
+    { "name": "Ada", "score": 91 },
+    { "name": "Linus", "score": 88 },
+    { "name": "Grace", "score": 99 },
+    { "name": "Margaret", "score": 94 }
+  ],
+  "top_only": true
+}

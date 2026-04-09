@@ -1,0 +1,28 @@
+program "sort_students"
+intent "Sort students by score descending and return the top 3"
+
+input students: dataset
+input top_only: bool
+output result: dataset
+
+constraint deterministic = true
+constraint explain = true
+
+object Student:
+  field name: string
+  field score: number
+
+project:
+  vcs: git
+  versioning: semantic
+
+module rank_students:
+  intent "Rank students by score and keep the highest scores first"
+  use "sort students by score descending"
+
+flow:
+  use module rank_students
+  if top_only == true:
+    use "sort students by score descending and return the top 3"
+  else:
+    emit students

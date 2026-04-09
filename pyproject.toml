@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ellang"
+version = "0.1.0"
+description = "AI-native programming language runtime with ProgramSpec, typed IR, stable bytecode, and native VM execution."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "OpenAI Codex" }]
+dependencies = []
+
+[project.optional-dependencies]
+hf = [
+  "transformers>=4.45.0",
+  "accelerate>=0.34.0",
+  "torch>=2.4.0",
+  "bitsandbytes>=0.43.0",
+  "safetensors>=0.4.0"
+]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+ellang = "ellang.cli:main"
+ellang-ideate = "ellang.ideation:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

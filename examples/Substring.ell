@@ -1,0 +1,27 @@
+program "substring_concat"
+intent "Return all starting indices of substrings in s that are a concatenation of all words in any order"
+
+input s: string
+input words: dataset
+output result: dataset
+
+constraint deterministic = true
+constraint explain = true
+
+module prepare:
+  intent "Compute the word length, total window length, and target frequency map"
+  use "compute word length from words"
+  use "compute total concatenation length"
+  use "build target frequency map for words"
+
+module search:
+  intent "Search every valid starting position in s"
+  use "scan s with a sliding window"
+  use "split each candidate window into equal-sized words"
+  use "count candidate word frequencies"
+  use "keep indices whose frequencies match the target map"
+
+flow:
+  use module prepare
+  use module search
+  emit result
