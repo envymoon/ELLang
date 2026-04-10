@@ -602,6 +602,10 @@ fn execute_algorithm_family(operand: &Value, bindings: &Bindings) -> Result<Valu
         .and_then(Value::as_str)
         .unwrap_or_default();
     match (family, task) {
+        ("array_manipulation", "rotate_array") => Ok(execute_rotate_array(bindings)),
+        ("array_manipulation", "binary_search") => Ok(execute_binary_search(bindings)),
+        ("array_manipulation", "max_subarray") => Ok(execute_max_subarray(bindings)),
+        ("array_manipulation", "product_except_self") => Ok(execute_product_except_self(bindings)),
         ("array_two_pointers", "three_sum") => Ok(execute_three_sum(bindings)),
         ("hashmap_counting", "group_anagrams") => Ok(execute_group_anagrams(bindings)),
         ("hashmap_counting", "most_frequent_element") => Ok(execute_most_frequent_element(bindings)),
@@ -737,6 +741,99 @@ fn execute_three_sum(bindings: &Bindings) -> Value {
         }
     }
     Value::Array(result)
+}
+
+fn execute_rotate_array(bindings: &Bindings) -> Value {
+    let values = bindings
+        .get("nums")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if values.is_empty() {
+        return Value::Array(Vec::new());
+    }
+    let steps = bindings.get("k").and_then(Value::as_i64).unwrap_or(0).max(0) as usize;
+    let offset = steps % values.len();
+    if offset == 0 {
+        return Value::Array(values);
+    }
+    let mut rotated = values[values.len() - offset..].to_vec();
+    rotated.extend_from_slice(&values[..values.len() - offset]);
+    Value::Array(rotated)
+}
+
+fn execute_binary_search(bindings: &Bindings) -> Value {
+    let nums = bindings
+        .get("nums")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_i64())
+        .collect::<Vec<_>>();
+    let target = bindings.get("target").and_then(Value::as_i64).unwrap_or(0);
+    let mut left = 0usize;
+    let mut right = nums.len();
+    while left < right {
+        let mid = left + (right - left) / 2;
+        if nums[mid] == target {
+            return Value::Number((mid as i64).into());
+        }
+        if nums[mid] < target {
+            left = mid + 1;
+        } else {
+            right = mid;
+        }
+    }
+    Value::Number((-1).into())
+}
+
+fn execute_max_subarray(bindings: &Bindings) -> Value {
+    let nums = bindings
+        .get("nums")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_i64())
+        .collect::<Vec<_>>();
+    if nums.is_empty() {
+        return Value::Number(0.into());
+    }
+    let mut best = nums[0];
+    let mut current = nums[0];
+    for value in nums.into_iter().skip(1) {
+        current = std::cmp::max(value, current + value);
+        best = std::cmp::max(best, current);
+    }
+    Value::Number(best.into())
+}
+
+fn execute_product_except_self(bindings: &Bindings) -> Value {
+    let nums = bindings
+        .get("nums")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|value| value.as_i64())
+        .collect::<Vec<_>>();
+    if nums.is_empty() {
+        return Value::Array(Vec::new());
+    }
+    let mut prefix = vec![1i64; nums.len()];
+    let mut suffix = vec![1i64; nums.len()];
+    for index in 1..nums.len() {
+        prefix[index] = prefix[index - 1] * nums[index - 1];
+    }
+    for index in (0..nums.len() - 1).rev() {
+        suffix[index] = suffix[index + 1] * nums[index + 1];
+    }
+    Value::Array(
+        (0..nums.len())
+            .map(|index| Value::Number((prefix[index] * suffix[index]).into()))
+            .collect(),
+    )
 }
 
 fn execute_group_anagrams(bindings: &Bindings) -> Value {

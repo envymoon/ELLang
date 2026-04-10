@@ -434,6 +434,33 @@ class CoreRuntimeTests(unittest.TestCase):
         normalized = sorted(sorted(item) for item in result.value)
         self.assertEqual(normalized, [[-1, -1, 2], [-1, 0, 1]])
 
+    def test_algorithm_family_rotate_array(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "Given an integer array nums, rotate the array to the right by k steps, where k is non-negative.",
+            {"nums": [1, 2, 3, 4, 5, 6, 7], "k": 3},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4, 5, 6, 7], "k": 3})
+        self.assertEqual(result.value, [5, 6, 7, 1, 2, 3, 4])
+
+    def test_algorithm_family_binary_search(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "Use binary search to find the target in the sorted array.",
+            {"nums": [-1, 0, 3, 5, 9, 12], "target": 9},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [-1, 0, 3, 5, 9, 12], "target": 9})
+        self.assertEqual(result.value, 4)
+
+    def test_algorithm_family_product_except_self(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "Return the product of array except self for each index.",
+            {"nums": [1, 2, 3, 4]},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4]})
+        self.assertEqual(result.value, [24, 12, 8, 6])
+
     def test_algorithm_family_hashmap_counting(self) -> None:
         drafted = IdeationEngine().ideate("Group the anagrams together.", {"words": ["eat", "tea", "tan", "ate", "nat", "bat"]})
         plan = Compiler().compile(parse_rendered_program(drafted.source))

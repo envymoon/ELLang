@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .compiler import Compiler
+from .algorithm_families import is_supported_algorithm_task
 from .models import QwenLocalBackend
 from .problem_spec import ProblemExample, ProblemSpec
 from .runtime import ExecutionEngine
@@ -240,6 +241,22 @@ class IdeationEngine:
                 ),
                 EmitStep("results"),
             ]
+        elif "rotate" in lower and "array" in lower and "right" in lower:
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "rotate_array"}
+            flow = [EmitStep("result")]
+        elif "binary search" in lower:
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "binary_search"}
+            flow = [EmitStep("result")]
+        elif "max subarray" in lower or "maximum subarray" in lower:
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "max_subarray"}
+            flow = [EmitStep("result")]
+        elif "product except self" in lower or "product of array except self" in lower:
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "product_except_self"}
+            flow = [EmitStep("result")]
         elif "anagram" in lower and "group" in lower:
             strategy = "matched_family"
             project = {"algorithm_family": "hashmap_counting", "algorithm_task": "group_anagrams"}
@@ -500,6 +517,10 @@ def _infer_output_type(idea: str) -> str:
         if "right side view" in lower:
             return "list"
         return "int"
+    if any(token in lower for token in ("rotate the array", "rotate array", "product except self")):
+        return "list"
+    if any(token in lower for token in ("binary search", "max subarray", "maximum subarray")):
+        return "int"
     if any(token in lower for token in ("indices", "results", "operations", "stack", "students", "list")):
         return "list"
     if "summary" in lower or "group" in lower:
@@ -580,6 +601,9 @@ def _problem_and_program_from_plan(payload: dict[str, Any], fallback_problem: Pr
         project["algorithm_family"] = problem_spec.algorithm_family_hint
     if problem_spec.algorithm_task_hint and "algorithm_task" not in project:
         project["algorithm_task"] = problem_spec.algorithm_task_hint
+    if project.get("algorithm_family") and project.get("algorithm_task"):
+        if not is_supported_algorithm_task(project["algorithm_family"], project["algorithm_task"]):
+            project = {}
     assembled = deserialize_program(
         {
             "name": problem_spec.name,
@@ -605,6 +629,8 @@ def _diagnose_execution_mismatch(spec: ProgramSpec, bindings: dict[str, Any], va
     lower = spec.intent.lower()
     if value == primary_value and any(token in lower for token in ("count", "frequency", "most frequent", "group", "sort", "top", "sum", "minimum", "maximum", "triplet", "indices")):
         diagnostics.append("Mismatch diagnosis: execution echoed the primary input instead of producing a transformed result.")
+    if isinstance(value, dict) and value.get("status") == "error":
+        diagnostics.append(f"Mismatch diagnosis: runtime returned an intrinsic error: {value.get('message', 'unknown error')}.")
     if "most frequent" in lower and isinstance(primary_value, list) and value not in primary_value:
         diagnostics.append("Mismatch diagnosis: most-frequent result is not present in the input collection.")
     if ("triplet" in lower or "triplets" in lower) and isinstance(value, list) and not value:

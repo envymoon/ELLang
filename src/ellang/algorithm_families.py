@@ -13,25 +13,25 @@ class FamilyExecution:
     result: Any
 
 
+REGISTRY: dict[tuple[str, str], Any] = {}
+
+
 def execute_algorithm_family(family: str, task: str, bindings: dict[str, Any]) -> FamilyExecution:
-    registry: dict[tuple[str, str], Any] = {
-        ("array_two_pointers", "three_sum"): _three_sum,
-        ("hashmap_counting", "group_anagrams"): _group_anagrams,
-        ("hashmap_counting", "most_frequent_element"): _most_frequent_element,
-        ("stack_queue_heap", "valid_parentheses"): _valid_parentheses,
-        ("stack_queue_heap", "top_k_frequent"): _top_k_frequent,
-        ("linked_list", "reverse_list"): _reverse_list,
-        ("tree_graph", "binary_tree_level_order"): _binary_tree_level_order,
-        ("tree_graph", "binary_tree_right_side_view"): _binary_tree_right_side_view,
-        ("tree_graph", "num_islands"): _num_islands,
-        ("dp_backtracking", "coin_change"): _coin_change,
-        ("dp_backtracking", "subsets"): _subsets,
-        ("dp_backtracking", "longest_increasing_subsequence"): _longest_increasing_subsequence,
-    }
-    solver = registry.get((family, task))
+    solver = REGISTRY.get((family, task))
     if solver is None:
         raise ValueError(f"Unsupported algorithm family task: {family}/{task}")
     return FamilyExecution(family=family, task=task, result=solver(bindings))
+
+
+def is_supported_algorithm_task(family: str, task: str) -> bool:
+    return (family, task) in REGISTRY
+
+
+def supported_algorithm_tasks() -> dict[str, list[str]]:
+    families: dict[str, list[str]] = {}
+    for family, task in REGISTRY:
+        families.setdefault(family, []).append(task)
+    return {family: sorted(tasks) for family, tasks in sorted(families.items())}
 
 
 def _three_sum(bindings: dict[str, Any]) -> list[list[int]]:
@@ -56,6 +56,56 @@ def _three_sum(bindings: dict[str, Any]) -> list[list[int]]:
             else:
                 right -= 1
     return result
+
+
+def _rotate_array(bindings: dict[str, Any]) -> list[Any]:
+    nums = list(bindings.get("nums", []))
+    if not nums:
+        return []
+    steps = int(bindings.get("k", 0))
+    offset = steps % len(nums)
+    if offset == 0:
+        return nums
+    return nums[-offset:] + nums[:-offset]
+
+
+def _binary_search(bindings: dict[str, Any]) -> int:
+    nums = [int(item) for item in bindings.get("nums", [])]
+    target = int(bindings.get("target", 0))
+    left, right = 0, len(nums) - 1
+    while left <= right:
+        mid = (left + right) // 2
+        if nums[mid] == target:
+            return mid
+        if nums[mid] < target:
+            left = mid + 1
+        else:
+            right = mid - 1
+    return -1
+
+
+def _max_subarray(bindings: dict[str, Any]) -> int:
+    nums = [int(item) for item in bindings.get("nums", [])]
+    if not nums:
+        return 0
+    best = current = nums[0]
+    for value in nums[1:]:
+        current = max(value, current + value)
+        best = max(best, current)
+    return best
+
+
+def _product_except_self(bindings: dict[str, Any]) -> list[int]:
+    nums = [int(item) for item in bindings.get("nums", [])]
+    if not nums:
+        return []
+    prefix = [1] * len(nums)
+    suffix = [1] * len(nums)
+    for index in range(1, len(nums)):
+        prefix[index] = prefix[index - 1] * nums[index - 1]
+    for index in range(len(nums) - 2, -1, -1):
+        suffix[index] = suffix[index + 1] * nums[index + 1]
+    return [prefix[index] * suffix[index] for index in range(len(nums))]
 
 
 def _group_anagrams(bindings: dict[str, Any]) -> list[list[str]]:
@@ -184,3 +234,25 @@ def _longest_increasing_subsequence(bindings: dict[str, Any]) -> int:
             if nums[j] < nums[i]:
                 dp[i] = max(dp[i], dp[j] + 1)
     return max(dp)
+
+
+REGISTRY.update(
+    {
+        ("array_manipulation", "rotate_array"): _rotate_array,
+        ("array_manipulation", "binary_search"): _binary_search,
+        ("array_manipulation", "max_subarray"): _max_subarray,
+        ("array_manipulation", "product_except_self"): _product_except_self,
+        ("array_two_pointers", "three_sum"): _three_sum,
+        ("hashmap_counting", "group_anagrams"): _group_anagrams,
+        ("hashmap_counting", "most_frequent_element"): _most_frequent_element,
+        ("stack_queue_heap", "valid_parentheses"): _valid_parentheses,
+        ("stack_queue_heap", "top_k_frequent"): _top_k_frequent,
+        ("linked_list", "reverse_list"): _reverse_list,
+        ("tree_graph", "binary_tree_level_order"): _binary_tree_level_order,
+        ("tree_graph", "binary_tree_right_side_view"): _binary_tree_right_side_view,
+        ("tree_graph", "num_islands"): _num_islands,
+        ("dp_backtracking", "coin_change"): _coin_change,
+        ("dp_backtracking", "subsets"): _subsets,
+        ("dp_backtracking", "longest_increasing_subsequence"): _longest_increasing_subsequence,
+    }
+)
