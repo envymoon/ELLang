@@ -17,6 +17,7 @@ def execute_algorithm_family(family: str, task: str, bindings: dict[str, Any]) -
     registry: dict[tuple[str, str], Any] = {
         ("array_two_pointers", "three_sum"): _three_sum,
         ("hashmap_counting", "group_anagrams"): _group_anagrams,
+        ("hashmap_counting", "most_frequent_element"): _most_frequent_element,
         ("stack_queue_heap", "valid_parentheses"): _valid_parentheses,
         ("stack_queue_heap", "top_k_frequent"): _top_k_frequent,
         ("linked_list", "reverse_list"): _reverse_list,
@@ -63,6 +64,18 @@ def _group_anagrams(bindings: dict[str, Any]) -> list[list[str]]:
     for word in words:
         groups[tuple(sorted(word))].append(word)
     return list(groups.values())
+
+
+def _most_frequent_element(bindings: dict[str, Any]) -> Any:
+    values = list(bindings.get("elements", bindings.get("nums", [])))
+    if not values:
+        return None
+    counts = Counter(values)
+    best_count = max(counts.values())
+    for value in values:
+        if counts[value] == best_count:
+            return value
+    return None
 
 
 def _valid_parentheses(bindings: dict[str, Any]) -> bool:

@@ -20,7 +20,27 @@ class FakeIdeationBackend:
     def plan_typed_program(self, spec):  # pragma: no cover - not used in this test
         raise NotImplementedError
 
-    def generate_ell_program(self, idea, bindings=None):
+    def generate_problem_plan(self, idea, bindings=None, diagnostics=None):
+        return {
+            "problem_spec": {
+                "name": "model_planned",
+                "summary": "Model planned program",
+                "problem_type": "transformation",
+                "inputs": {"nums": "list"},
+                "outputs": {"result": "list"},
+                "constraints": {"deterministic": "true"},
+                "correctness_conditions": ["Return the transformed list."],
+            },
+            "program_spec": {
+                "project": {},
+                "modules": [],
+                "flow": [{"kind": "EmitStep", "expression": "nums"}],
+            },
+            "confidence": 0.82,
+            "rationale": "simple passthrough planner",
+        }
+
+    def generate_ell_program(self, idea, bindings=None, diagnostics=None):
         return (
             'program "model_generated"\n'
             'intent "Model generated program"\n\n'
@@ -29,6 +49,51 @@ class FakeIdeationBackend:
             "constraint deterministic = true\n\n"
             "flow:\n"
             "  emit nums\n"
+        )
+
+
+class RepairingIdeationBackend:
+    def __init__(self) -> None:
+        self.problem_plan_calls = 0
+        self.ell_calls = 0
+
+    def plan_typed_program(self, spec):  # pragma: no cover - not used in this test
+        raise NotImplementedError
+
+    def generate_problem_plan(self, idea, bindings=None, diagnostics=None):
+        self.problem_plan_calls += 1
+        return {
+            "problem_spec": {
+                "name": "broken_plan",
+                "summary": "Broken planner output",
+                "problem_type": "transformation",
+                "inputs": {"nums": "list"},
+                "outputs": {"result": "list"},
+                "constraints": {"deterministic": "true"},
+                "correctness_conditions": ["Return a transformed result."],
+            },
+            "program_spec": {
+                "project": {},
+                "modules": [],
+                "flow": [{"kind": "EmitStep", "expression": "nums"}],
+            },
+            "confidence": 0.41,
+            "rationale": "intentionally weak plan for repair test",
+        }
+
+    def generate_ell_program(self, idea, bindings=None, diagnostics=None):
+        self.ell_calls += 1
+        return (
+            'program "repaired_program"\n'
+            'intent "Return the most frequent element"\n\n'
+            "input elements: list\n"
+            "output result: int\n\n"
+            "constraint deterministic = true\n\n"
+            "project:\n"
+            "  algorithm_family: hashmap_counting\n"
+            "  algorithm_task: most_frequent_element\n\n"
+            "flow:\n"
+            "  emit result\n"
         )
 
 
@@ -276,9 +341,23 @@ class CoreRuntimeTests(unittest.TestCase):
             "Build a bespoke numeric reshaping workflow.",
             {"nums": [1, 2, 3]},
         )
-        self.assertEqual(drafted.spec.name, "model_generated")
-        self.assertIn('program "model_generated"', drafted.source)
-        self.assertTrue(any("local model generation produced the .ell program" in item for item in drafted.diagnostics))
+        self.assertEqual(drafted.problem_spec.name, "model_planned")
+        self.assertEqual(drafted.spec.name, "model_planned")
+        self.assertIn('program "model_planned"', drafted.source)
+        self.assertTrue(any("structured JSON plan" in item for item in drafted.diagnostics))
+
+    def test_ideation_constrained_regenerate_repairs_mismatch(self) -> None:
+        backend = RepairingIdeationBackend()
+        drafted = IdeationEngine(backend=backend).ideate(
+            "count the elements and return a summary value",
+            {"elements": [1, 2, 2, 3]},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"elements": [1, 2, 2, 3]})
+        self.assertEqual(result.value, 2)
+        self.assertGreaterEqual(backend.problem_plan_calls, 1)
+        self.assertGreaterEqual(backend.ell_calls, 1)
+        self.assertTrue(any("Mismatch diagnosis:" in item for item in drafted.diagnostics))
 
     def test_structured_minstack_executes_correctly(self) -> None:
         spec = parse_program(
@@ -361,6 +440,25 @@ class CoreRuntimeTests(unittest.TestCase):
         result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"words": ["eat", "tea", "tan", "ate", "nat", "bat"]})
         normalized = sorted(sorted(group) for group in result.value)
         self.assertEqual(normalized, [["ate", "eat", "tea"], ["bat"], ["nat", "tan"]])
+
+    def test_algorithm_family_most_frequent_element(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "count the frequency of each element in the list and return the most frequent one",
+            {"elements": [1, 2, 3, 2, 4, 2, 5, 3, 7, 5, 1, 41, 4, 6, 8, 4, 1, 2, 6, 4, 5, 7, 1, 2]},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(
+            plan,
+            {"elements": [1, 2, 3, 2, 4, 2, 5, 3, 7, 5, 1, 41, 4, 6, 8, 4, 1, 2, 6, 4, 5, 7, 1, 2]},
+        )
+        self.assertEqual(result.value, 2)
+
+    def test_list_does_not_false_match_lis(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "count the frequency of each element in the list and return the most frequent one",
+            {"elements": [1, 2, 2]},
+        )
+        self.assertNotEqual(drafted.spec.project.get("algorithm_task"), "longest_increasing_subsequence")
 
     def test_algorithm_family_stack_queue_heap(self) -> None:
         drafted = IdeationEngine().ideate("Check whether a parentheses string is valid.", {"s": "()[]{}"})

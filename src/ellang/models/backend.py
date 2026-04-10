@@ -55,7 +55,20 @@ class LocalModelBackend(Protocol):
     def plan_typed_program(self, spec: ProgramSpec) -> BackendResult:
         ...
 
-    def generate_ell_program(self, idea: str, bindings: dict[str, Any] | None = None) -> str | None:
+    def generate_problem_plan(
+        self,
+        idea: str,
+        bindings: dict[str, Any] | None = None,
+        diagnostics: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        ...
+
+    def generate_ell_program(
+        self,
+        idea: str,
+        bindings: dict[str, Any] | None = None,
+        diagnostics: list[str] | None = None,
+    ) -> str | None:
         ...
 
 
@@ -233,9 +246,24 @@ class QwenLocalBackend:
             diagnostics.append(f"Local backend detail: {self._load_error}")
         return BackendResult(typed_program_payload=payload, diagnostics=diagnostics)
 
-    def generate_ell_program(self, idea: str, bindings: dict[str, Any] | None = None) -> str | None:
+    def generate_problem_plan(
+        self,
+        idea: str,
+        bindings: dict[str, Any] | None = None,
+        diagnostics: list[str] | None = None,
+    ) -> dict[str, Any] | None:
         bindings = bindings or {}
-        prompt = self._ell_generation_prompt(idea, bindings)
+        prompt = self._problem_plan_prompt(idea, bindings, diagnostics or [])
+        return self._infer_json(prompt)
+
+    def generate_ell_program(
+        self,
+        idea: str,
+        bindings: dict[str, Any] | None = None,
+        diagnostics: list[str] | None = None,
+    ) -> str | None:
+        bindings = bindings or {}
+        prompt = self._ell_generation_prompt(idea, bindings, diagnostics or [])
         bundle = self._get_model_bundle()
         if bundle is None:
             return None
@@ -310,7 +338,48 @@ class QwenLocalBackend:
             f"Constraints: {json.dumps(spec.constraints, ensure_ascii=False)}\n"
         )
 
-    def _ell_generation_prompt(self, idea: str, bindings: dict[str, Any]) -> str:
+    def _problem_plan_prompt(self, idea: str, bindings: dict[str, Any], diagnostics: list[str]) -> str:
+        inferred_inputs = {key: _binding_type(value) for key, value in bindings.items()}
+        return (
+            "You are the constrained planner for ELLang.\n"
+            "Do not output code. Do not output markdown. Do not output prose outside JSON.\n"
+            "Return one strict JSON object with this schema:\n"
+            "{\n"
+            '  "problem_spec": {\n'
+            '    "name": "snake_case_name",\n'
+            '    "summary": "one sentence summary",\n'
+            '    "problem_type": "algorithm|data_structure|transformation|query|state_machine",\n'
+            '    "inputs": {"name":"type"},\n'
+            '    "outputs": {"result":"type"},\n'
+            '    "constraints": {"deterministic":"true"},\n'
+            '    "correctness_conditions": ["..."],\n'
+            '    "algorithm_family_hint": "",\n'
+            '    "algorithm_task_hint": ""\n'
+            "  },\n"
+            '  "program_spec": {\n'
+            '    "project": {"algorithm_family":"", "algorithm_task":""},\n'
+            '    "modules": [\n'
+            '      {"name":"module_name","intent":"...","params":["arg"],"steps":[{"kind":"ActionStep","action":"..."}]}\n'
+            "    ],\n"
+            '    "flow": [{"kind":"EmitStep","expression":"result"}]\n'
+            "  },\n"
+            '  "confidence": 0.0,\n'
+            '  "rationale": "short planning note"\n'
+            "}\n"
+            "Allowed step kinds:\n"
+            "ActionStep, ModuleCallStep, CallStep, EmitStep, IfStep, LoopStep, WhileStep, AppendStep, RemoveLastStep, ReturnStep, InitializeStep, AssignStep, BreakStep, ContinueStep.\n"
+            "Rules:\n"
+            "- Always return valid JSON.\n"
+            "- Prefer project.algorithm_family and project.algorithm_task for known algorithm families.\n"
+            "- If you use structured steps, keep them deterministic and executable.\n"
+            "- Never return free text outside the JSON object.\n"
+            f"Idea: {idea}\n"
+            f"Bindings: {json.dumps(bindings, ensure_ascii=False)}\n"
+            f"Inferred input types: {json.dumps(inferred_inputs, ensure_ascii=False)}\n"
+            f"Validation diagnostics from previous attempts: {json.dumps(diagnostics, ensure_ascii=False)}\n"
+        )
+
+    def _ell_generation_prompt(self, idea: str, bindings: dict[str, Any], diagnostics: list[str]) -> str:
         inferred_inputs = {key: _binding_type(value) for key, value in bindings.items()}
         return (
             "Generate a valid ELLang program only.\n"
@@ -339,6 +408,7 @@ class QwenLocalBackend:
             f"Idea: {idea}\n"
             f"Bindings: {json.dumps(bindings, ensure_ascii=False)}\n"
             f"Inferred input types: {json.dumps(inferred_inputs, ensure_ascii=False)}\n"
+            f"Validation diagnostics from previous attempts: {json.dumps(diagnostics, ensure_ascii=False)}\n"
         )
 
     def _infer_json(self, prompt: str) -> dict[str, Any] | None:

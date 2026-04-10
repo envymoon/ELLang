@@ -604,6 +604,7 @@ fn execute_algorithm_family(operand: &Value, bindings: &Bindings) -> Result<Valu
     match (family, task) {
         ("array_two_pointers", "three_sum") => Ok(execute_three_sum(bindings)),
         ("hashmap_counting", "group_anagrams") => Ok(execute_group_anagrams(bindings)),
+        ("hashmap_counting", "most_frequent_element") => Ok(execute_most_frequent_element(bindings)),
         ("stack_queue_heap", "valid_parentheses") => Ok(execute_valid_parentheses(bindings)),
         ("stack_queue_heap", "top_k_frequent") => Ok(execute_top_k_frequent(bindings)),
         ("linked_list", "reverse_list") => Ok(execute_reverse_list(bindings)),
@@ -754,6 +755,29 @@ fn execute_group_anagrams(bindings: &Bindings) -> Value {
         }
     }
     Value::Array(groups.into_values().map(Value::Array).collect())
+}
+
+fn execute_most_frequent_element(bindings: &Bindings) -> Value {
+    let values = bindings
+        .get("elements")
+        .or_else(|| bindings.get("nums"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if values.is_empty() {
+        return Value::Null;
+    }
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for value in &values {
+        *counts.entry(value.to_string()).or_insert(0) += 1;
+    }
+    let best_count = counts.values().copied().max().unwrap_or(0);
+    for value in values {
+        if counts.get(&value.to_string()).copied().unwrap_or(0) == best_count {
+            return value;
+        }
+    }
+    Value::Null
 }
 
 fn execute_valid_parentheses(bindings: &Bindings) -> Value {

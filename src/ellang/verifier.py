@@ -33,7 +33,7 @@ OPERATOR_SIGNATURES: dict[GenericOperator, tuple[set[ValueType], set[ValueType]]
     GenericOperator.REDUCE: ({ValueType.DATASET, ValueType.LIST, ValueType.ANY}, {ValueType.RECORD, ValueType.MAP, ValueType.ANY}),
     GenericOperator.EVAL_CONDITION: ({ValueType.ANY, ValueType.BOOL}, {ValueType.BOOL}),
     GenericOperator.LOOP: ({ValueType.DATASET, ValueType.LIST, ValueType.ANY}, {ValueType.DATASET, ValueType.LIST, ValueType.ANY}),
-    GenericOperator.CALL_INTRINSIC: ({ValueType.ANY, ValueType.RECORD, ValueType.DATASET, ValueType.LIST}, {ValueType.ANY, ValueType.INT, ValueType.LIST, ValueType.DATASET, ValueType.RECORD}),
+    GenericOperator.CALL_INTRINSIC: ({ValueType.ANY, ValueType.RECORD, ValueType.DATASET, ValueType.LIST}, {ValueType.ANY, ValueType.INT, ValueType.BOOL, ValueType.LIST, ValueType.DATASET, ValueType.RECORD}),
     GenericOperator.CALL_FFI: ({ValueType.ANY, ValueType.RECORD, ValueType.DATASET, ValueType.LIST, ValueType.STRING}, {ValueType.ANY, ValueType.RECORD, ValueType.DATASET, ValueType.STRING}),
 }
 

@@ -9,6 +9,7 @@ from typing import Any
 
 from .compiler import Compiler
 from .models import QwenLocalBackend
+from .problem_spec import ProblemExample, ProblemSpec
 from .runtime import ExecutionEngine
 from .syntax import (
     ActionStep,
@@ -26,6 +27,7 @@ from .syntax import (
     RemoveLastStep,
     ReturnStep,
     AssignStep,
+    deserialize_program,
     parse_program,
     render_program,
 )
@@ -34,6 +36,14 @@ from .visualization import mermaid_flowchart, mermaid_trace
 
 @dataclass(slots=True)
 class IdeationResult:
+    problem_spec: ProblemSpec
+    spec: ProgramSpec
+    source: str
+    diagnostics: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _ValidationAttempt:
     spec: ProgramSpec
     source: str
     diagnostics: list[str] = field(default_factory=list)
@@ -45,25 +55,45 @@ class IdeationEngine:
 
     def ideate(self, idea: str, bindings: dict[str, Any] | None = None) -> IdeationResult:
         bindings = bindings or {}
-        draft, strategy = self._heuristic_spec(idea, bindings)
-        diagnostics = ["Ideation used natural-language to ProgramSpec lowering."]
-        if strategy == "generic_fallback":
-            model_source = self.backend.generate_ell_program(idea, bindings)
-            if model_source:
-                try:
-                    parsed = parse_program(model_source)
-                except Exception as exc:
-                    diagnostics.append(f"Model-generated .ell could not be parsed, so ideation fell back to heuristic lowering: {exc}")
-                else:
-                    diagnostics.append("Heuristic ideation did not find a strong template, so local model generation produced the .ell program.")
-                    diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
-                    return IdeationResult(spec=parsed, source=model_source, diagnostics=diagnostics)
-            else:
-                diagnostics.append("Heuristic ideation did not find a strong template and no local model-generated .ell was available, so generic heuristic lowering was used.")
-        diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
-        return IdeationResult(spec=draft, source=render_program(draft), diagnostics=diagnostics)
+        problem_spec, draft, strategy = self._heuristic_spec(idea, bindings)
+        diagnostics = [
+            "Ideation used natural-language to ProblemSpec lowering.",
+            f"Problem type: {problem_spec.problem_type}",
+        ]
+        first_attempt = _ValidationAttempt(spec=draft, source=render_program(draft))
+        validated, validation_diags = self._validate_candidate(first_attempt, bindings)
+        diagnostics.extend(validation_diags)
+        if validated is not None and strategy != "generic_fallback":
+            diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
+            return IdeationResult(problem_spec=problem_spec, spec=validated.spec, source=validated.source, diagnostics=diagnostics)
 
-    def _heuristic_spec(self, idea: str, bindings: dict[str, Any]) -> tuple[ProgramSpec, str]:
+        if strategy == "generic_fallback":
+            recovered_ok = False
+            recovered = self._regenerate_from_planner_json(idea, bindings, problem_spec, diagnostics + validation_diags)
+            if recovered is not None:
+                recovered_problem, recovered_attempt, recovered_diags = recovered
+                diagnostics.extend(recovered_diags)
+                validated_recovered, recovered_validation = self._validate_candidate(recovered_attempt, bindings)
+                diagnostics.extend(recovered_validation)
+                if validated_recovered is not None:
+                    recovered_ok = True
+                    diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
+                    return IdeationResult(problem_spec=recovered_problem, spec=validated_recovered.spec, source=validated_recovered.source, diagnostics=diagnostics)
+
+            if not recovered_ok:
+                ell_regenerated = self._regenerate_from_ell(idea, bindings, diagnostics)
+                if ell_regenerated is not None:
+                    diagnostics.append("Structured planning could not fully validate, so constrained model regeneration produced a repaired .ell candidate.")
+                    validated_ell, regenerated_diags = self._validate_candidate(ell_regenerated, bindings)
+                    diagnostics.extend(regenerated_diags)
+                    if validated_ell is not None:
+                        diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
+                        return IdeationResult(problem_spec=problem_spec, spec=validated_ell.spec, source=validated_ell.source, diagnostics=diagnostics)
+
+        diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
+        return IdeationResult(problem_spec=problem_spec, spec=draft, source=render_program(draft), diagnostics=diagnostics)
+
+    def _heuristic_spec(self, idea: str, bindings: dict[str, Any]) -> tuple[ProblemSpec, ProgramSpec, str]:
         program_name = _slug_to_program_name(idea)
         inputs = {key: _infer_binding_type(value) for key, value in bindings.items()}
         if not inputs:
@@ -214,6 +244,10 @@ class IdeationEngine:
             strategy = "matched_family"
             project = {"algorithm_family": "hashmap_counting", "algorithm_task": "group_anagrams"}
             flow = [EmitStep("result")]
+        elif ("frequency" in lower or "frequent" in lower or "count" in lower) and ("most frequent" in lower or "return the most frequent" in lower):
+            strategy = "matched_family"
+            project = {"algorithm_family": "hashmap_counting", "algorithm_task": "most_frequent_element"}
+            flow = [EmitStep("result")]
         elif "parentheses" in lower and "valid" in lower:
             strategy = "matched_family"
             project = {"algorithm_family": "stack_queue_heap", "algorithm_task": "valid_parentheses"}
@@ -246,7 +280,7 @@ class IdeationEngine:
             strategy = "matched_family"
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "subsets"}
             flow = [EmitStep("result")]
-        elif "longest increasing subsequence" in lower or "lis" in lower:
+        elif "longest increasing subsequence" in lower or re.search(r"\blis\b", lower):
             strategy = "matched_family"
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "longest_increasing_subsequence"}
             flow = [EmitStep("result")]
@@ -274,20 +308,98 @@ class IdeationEngine:
             }
             flow = [ModuleCallStep("plan"), EmitStep(primary if primary != "input" else "result")]
 
-        return (
-            ProgramSpec(
-                name=program_name,
-                intent=_normalize_sentence(idea),
-                inputs=inputs,
-                outputs=outputs,
-                constraints=constraints,
-                objects=objects,
-                modules=modules,
-                project=project,
-                flow=flow,
-            ),
-            strategy,
+        problem_spec = ProblemSpec(
+            name=program_name,
+            summary=_normalize_sentence(idea),
+            problem_type=_infer_problem_type(idea, project),
+            inputs=inputs,
+            outputs=outputs,
+            constraints=constraints,
+            correctness_conditions=_infer_correctness_conditions(idea, project),
+            examples=[ProblemExample(description="user_bindings", bindings=bindings)] if bindings else [],
+            algorithm_family_hint=project.get("algorithm_family", ""),
+            algorithm_task_hint=project.get("algorithm_task", ""),
         )
+        spec = ProgramSpec(
+            name=program_name,
+            intent=_normalize_sentence(idea),
+            inputs=inputs,
+            outputs=outputs,
+            constraints=constraints,
+            objects=objects,
+            modules=modules,
+            project=project,
+            flow=flow,
+        )
+        return problem_spec, spec, strategy
+
+    def _regenerate_from_planner_json(
+        self,
+        idea: str,
+        bindings: dict[str, Any],
+        fallback_problem: ProblemSpec,
+        diagnostics: list[str],
+    ) -> tuple[ProblemSpec, _ValidationAttempt, list[str]] | None:
+        payload = self.backend.generate_problem_plan(idea, bindings, diagnostics)
+        if not payload:
+            return None
+        try:
+            problem_spec, program_spec = _problem_and_program_from_plan(payload, fallback_problem)
+        except Exception as exc:
+            diagnostics.append(f"Planner JSON could not be converted into ProgramSpec: {exc}")
+            return None
+        generated_source = render_program(program_spec)
+        generated_diags = [
+            "Heuristic ideation did not find a strong template, so local model planning produced a structured JSON plan.",
+            f"Planner confidence: {payload.get('confidence', 0.0)}",
+        ]
+        return problem_spec, _ValidationAttempt(spec=program_spec, source=generated_source), generated_diags
+
+    def _regenerate_from_ell(self, idea: str, bindings: dict[str, Any], diagnostics: list[str]) -> _ValidationAttempt | None:
+        model_source = self.backend.generate_ell_program(idea, bindings, diagnostics)
+        if not model_source:
+            return None
+        try:
+            parsed = parse_program(model_source)
+        except Exception:
+            return None
+        return _ValidationAttempt(spec=parsed, source=model_source)
+
+    def _validate_candidate(self, attempt: _ValidationAttempt, bindings: dict[str, Any]) -> tuple[_ValidationAttempt | None, list[str]]:
+        diagnostics: list[str] = []
+        try:
+            parsed = parse_program(attempt.source)
+        except Exception as exc:
+            diagnostics.append(f"Parse failed: {exc}")
+            return None, diagnostics
+        try:
+            plan = Compiler().compile(parsed)
+        except Exception as exc:
+            diagnostics.append(f"Type check failed during compile: {exc}")
+            return None, diagnostics
+        diagnostics.append("Parse and type-check completed.")
+        diagnostics.append(f"Sample tests synthesized: {len(plan.suggested_tests)}.")
+        if bindings:
+            missing_inputs = sorted(set(parsed.inputs.keys()) - set(bindings.keys()))
+            if missing_inputs:
+                diagnostics.append(f"Mismatch diagnosis: generated program expects missing inputs {missing_inputs}.")
+                return None, diagnostics
+            try:
+                result = ExecutionEngine().execute(plan, bindings)
+            except Exception as exc:
+                diagnostics.append(f"Sample execution failed: {exc}")
+                return None, diagnostics
+            diagnostics.append("Sample execution completed.")
+            diagnostics.extend(_diagnose_execution_mismatch(parsed, bindings, result.value))
+            if parsed.constraints.get("deterministic", "").lower() == "true":
+                second = ExecutionEngine().execute(plan, bindings)
+                if second.value != result.value:
+                    diagnostics.append("Determinism check failed: repeated sample execution produced a different result.")
+                    return None, diagnostics
+                diagnostics.append("Determinism check passed.")
+            if any(item.startswith("Mismatch diagnosis:") for item in diagnostics):
+                return None, diagnostics
+        return _ValidationAttempt(spec=parsed, source=attempt.source), diagnostics
 
 
 def main() -> int:
@@ -327,6 +439,7 @@ def main() -> int:
     payload = {
         "idea": idea,
         "program": drafted.spec.name,
+        "problem_spec": asdict(drafted.problem_spec),
         "ell_source": drafted.source if show_ell or write_path is None else str(write_path),
         "ideation_diagnostics": drafted.diagnostics,
         "diagnostics": result.diagnostics,
@@ -381,6 +494,12 @@ def _infer_inputs_from_idea(idea: str) -> dict[str, str]:
 
 def _infer_output_type(idea: str) -> str:
     lower = idea.lower()
+    if any(token in lower for token in ("most frequent", "minimum number", "length of", "count of", "number of islands", "is valid", "right side view")):
+        if "is valid" in lower:
+            return "bool"
+        if "right side view" in lower:
+            return "list"
+        return "int"
     if any(token in lower for token in ("indices", "results", "operations", "stack", "students", "list")):
         return "list"
     if "summary" in lower or "group" in lower:
@@ -398,6 +517,99 @@ def _slug_to_program_name(idea: str) -> str:
 def _normalize_sentence(text: str) -> str:
     normalized = " ".join(text.strip().split())
     return normalized[0].upper() + normalized[1:] if normalized else "Generated program"
+
+
+def _infer_problem_type(idea: str, project: dict[str, str]) -> str:
+    lower = idea.lower()
+    if project.get("algorithm_family"):
+        if any(token in project["algorithm_family"] for token in ("tree", "graph", "dp", "array", "hashmap", "linked")):
+            return "algorithm"
+    if "stack" in lower or "queue" in lower or "linked list" in lower:
+        return "data_structure"
+    if any(token in lower for token in ("transform", "group", "count", "sort", "select")):
+        return "transformation"
+    return "algorithm"
+
+
+def _infer_correctness_conditions(idea: str, project: dict[str, str]) -> list[str]:
+    conditions = ["Program output must satisfy the declared intent."]
+    lower = idea.lower()
+    if "duplicate" in lower:
+        conditions.append("Output must not contain duplicates when the prompt forbids them.")
+    if "any order" in lower:
+        conditions.append("Output ordering may vary while preserving semantic correctness.")
+    if project.get("algorithm_family"):
+        conditions.append(f"Prefer deterministic lowering for {project['algorithm_family']}.")
+    return conditions
+
+
+def _problem_and_program_from_plan(payload: dict[str, Any], fallback_problem: ProblemSpec) -> tuple[ProblemSpec, ProgramSpec]:
+    problem_payload = payload.get("problem_spec", {})
+    if not isinstance(problem_payload, dict):
+        raise ValueError("Planner JSON must contain a problem_spec object.")
+    problem_spec = ProblemSpec(
+        name=str(problem_payload.get("name", fallback_problem.name)),
+        summary=str(problem_payload.get("summary", fallback_problem.summary)),
+        problem_type=str(problem_payload.get("problem_type", fallback_problem.problem_type)),
+        inputs=dict(problem_payload.get("inputs", fallback_problem.inputs)),
+        outputs=dict(problem_payload.get("outputs", fallback_problem.outputs)),
+        constraints={str(key): str(value) for key, value in dict(problem_payload.get("constraints", fallback_problem.constraints)).items()},
+        correctness_conditions=[str(item) for item in problem_payload.get("correctness_conditions", fallback_problem.correctness_conditions)],
+        examples=list(fallback_problem.examples),
+        algorithm_family_hint=str(problem_payload.get("algorithm_family_hint", fallback_problem.algorithm_family_hint)),
+        algorithm_task_hint=str(problem_payload.get("algorithm_task_hint", fallback_problem.algorithm_task_hint)),
+    )
+    program_payload = payload.get("program_spec", {})
+    if not isinstance(program_payload, dict):
+        raise ValueError("Planner JSON must contain a program_spec object.")
+    modules: dict[str, dict[str, Any]] = {}
+    for item in program_payload.get("modules", []):
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
+        modules[name] = {
+            "name": name,
+            "intent": str(item.get("intent", "")),
+            "params": [str(arg) for arg in item.get("params", [])],
+            "steps": [step for step in item.get("steps", []) if isinstance(step, dict)],
+        }
+    project = {str(key): str(value) for key, value in dict(program_payload.get("project", {})).items()}
+    if problem_spec.algorithm_family_hint and "algorithm_family" not in project:
+        project["algorithm_family"] = problem_spec.algorithm_family_hint
+    if problem_spec.algorithm_task_hint and "algorithm_task" not in project:
+        project["algorithm_task"] = problem_spec.algorithm_task_hint
+    assembled = deserialize_program(
+        {
+            "name": problem_spec.name,
+            "intent": problem_spec.summary,
+            "inputs": problem_spec.inputs,
+            "outputs": problem_spec.outputs,
+            "constraints": problem_spec.constraints,
+            "objects": {},
+            "modules": modules,
+            "project": project,
+            "flow": [step for step in program_payload.get("flow", []) if isinstance(step, dict)],
+        }
+    )
+    return problem_spec, assembled
+
+
+def _diagnose_execution_mismatch(spec: ProgramSpec, bindings: dict[str, Any], value: Any) -> list[str]:
+    diagnostics: list[str] = []
+    if not bindings:
+        return diagnostics
+    primary_name = next(iter(bindings.keys()))
+    primary_value = bindings.get(primary_name)
+    lower = spec.intent.lower()
+    if value == primary_value and any(token in lower for token in ("count", "frequency", "most frequent", "group", "sort", "top", "sum", "minimum", "maximum", "triplet", "indices")):
+        diagnostics.append("Mismatch diagnosis: execution echoed the primary input instead of producing a transformed result.")
+    if "most frequent" in lower and isinstance(primary_value, list) and value not in primary_value:
+        diagnostics.append("Mismatch diagnosis: most-frequent result is not present in the input collection.")
+    if ("triplet" in lower or "triplets" in lower) and isinstance(value, list) and not value:
+        diagnostics.append("Mismatch diagnosis: triplet search returned an empty result on a non-trivial sample input.")
+    return diagnostics
 
 
 if __name__ == "__main__":
