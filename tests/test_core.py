@@ -16,6 +16,22 @@ from ellang.security import RuntimeQuota
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+class FakeIdeationBackend:
+    def plan_typed_program(self, spec):  # pragma: no cover - not used in this test
+        raise NotImplementedError
+
+    def generate_ell_program(self, idea, bindings=None):
+        return (
+            'program "model_generated"\n'
+            'intent "Model generated program"\n\n'
+            "input nums: list\n"
+            "output result: list\n\n"
+            "constraint deterministic = true\n\n"
+            "flow:\n"
+            "  emit nums\n"
+        )
+
+
 class CoreRuntimeTests(unittest.TestCase):
     def test_parse_compile_execute_sort(self) -> None:
         spec = parse_program(
@@ -254,6 +270,15 @@ class CoreRuntimeTests(unittest.TestCase):
         )
         self.assertIn('program "', drafted.source)
         self.assertEqual(result.value[0]["name"], "Grace")
+
+    def test_ideation_uses_model_generated_ell_for_generic_fallback(self) -> None:
+        drafted = IdeationEngine(backend=FakeIdeationBackend()).ideate(
+            "Build a bespoke numeric reshaping workflow.",
+            {"nums": [1, 2, 3]},
+        )
+        self.assertEqual(drafted.spec.name, "model_generated")
+        self.assertIn('program "model_generated"', drafted.source)
+        self.assertTrue(any("local model generation produced the .ell program" in item for item in drafted.diagnostics))
 
     def test_structured_minstack_executes_correctly(self) -> None:
         spec = parse_program(

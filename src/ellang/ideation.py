@@ -26,6 +26,7 @@ from .syntax import (
     RemoveLastStep,
     ReturnStep,
     AssignStep,
+    parse_program,
     render_program,
 )
 from .visualization import mermaid_flowchart, mermaid_trace
@@ -44,12 +45,25 @@ class IdeationEngine:
 
     def ideate(self, idea: str, bindings: dict[str, Any] | None = None) -> IdeationResult:
         bindings = bindings or {}
-        draft = self._heuristic_spec(idea, bindings)
+        draft, strategy = self._heuristic_spec(idea, bindings)
         diagnostics = ["Ideation used natural-language to ProgramSpec lowering."]
+        if strategy == "generic_fallback":
+            model_source = self.backend.generate_ell_program(idea, bindings)
+            if model_source:
+                try:
+                    parsed = parse_program(model_source)
+                except Exception as exc:
+                    diagnostics.append(f"Model-generated .ell could not be parsed, so ideation fell back to heuristic lowering: {exc}")
+                else:
+                    diagnostics.append("Heuristic ideation did not find a strong template, so local model generation produced the .ell program.")
+                    diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
+                    return IdeationResult(spec=parsed, source=model_source, diagnostics=diagnostics)
+            else:
+                diagnostics.append("Heuristic ideation did not find a strong template and no local model-generated .ell was available, so generic heuristic lowering was used.")
         diagnostics.append("Generated .ell is an editable mid-level view; the execution result comes from compiled runtime execution.")
         return IdeationResult(spec=draft, source=render_program(draft), diagnostics=diagnostics)
 
-    def _heuristic_spec(self, idea: str, bindings: dict[str, Any]) -> ProgramSpec:
+    def _heuristic_spec(self, idea: str, bindings: dict[str, Any]) -> tuple[ProgramSpec, str]:
         program_name = _slug_to_program_name(idea)
         inputs = {key: _infer_binding_type(value) for key, value in bindings.items()}
         if not inputs:
@@ -64,6 +78,7 @@ class IdeationEngine:
         flow: list[Any]
 
         if "minstack" in lower or ("stack" in lower and "getmin" in lower):
+            strategy = "matched_template"
             objects["MinStack"] = ObjectSpec(name="MinStack", fields={"stack": "list", "min_stack": "list"})
             modules = {
                 "push": ModuleSpec(
@@ -131,6 +146,7 @@ class IdeationEngine:
                 EmitStep("results"),
             ]
         elif "substring" in lower and "word" in lower:
+            strategy = "matched_template"
             modules = {
                 "prepare": ModuleSpec(
                     name="prepare",
@@ -154,6 +170,7 @@ class IdeationEngine:
             }
             flow = [ModuleCallStep("prepare"), ModuleCallStep("search"), EmitStep("result")]
         elif (("triplet" in lower or "triplets" in lower) and "== 0" in lower) or "sum to zero" in lower or "3sum" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "array_two_pointers", "algorithm_task": "three_sum"}
             flow = [
                 AssignStep("sorted_nums", "sorted(nums)"),
@@ -194,36 +211,47 @@ class IdeationEngine:
                 EmitStep("results"),
             ]
         elif "anagram" in lower and "group" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "hashmap_counting", "algorithm_task": "group_anagrams"}
             flow = [EmitStep("result")]
         elif "parentheses" in lower and "valid" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "stack_queue_heap", "algorithm_task": "valid_parentheses"}
             flow = [EmitStep("result")]
         elif "top k frequent" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "stack_queue_heap", "algorithm_task": "top_k_frequent"}
             flow = [EmitStep("result")]
         elif "reverse linked list" in lower or "reverse a linked list" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "linked_list", "algorithm_task": "reverse_list"}
             flow = [EmitStep("result")]
         elif "level order" in lower and "tree" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "tree_graph", "algorithm_task": "binary_tree_level_order"}
             flow = [EmitStep("result")]
         elif "right side view" in lower and "tree" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "tree_graph", "algorithm_task": "binary_tree_right_side_view"}
             flow = [EmitStep("result")]
         elif "number of islands" in lower or "num islands" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "tree_graph", "algorithm_task": "num_islands"}
             flow = [EmitStep("result")]
         elif "coin change" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "coin_change"}
             flow = [EmitStep("result")]
         elif "subsets" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "subsets"}
             flow = [EmitStep("result")]
         elif "longest increasing subsequence" in lower or "lis" in lower:
+            strategy = "matched_family"
             project = {"algorithm_family": "dp_backtracking", "algorithm_task": "longest_increasing_subsequence"}
             flow = [EmitStep("result")]
         elif any(token in lower for token in ("sort", "top", "highest", "rank")):
+            strategy = "matched_template"
             dataset_name = next(iter(inputs.keys()), "items")
             key_name = "score" if "score" in lower else "value"
             modules = {
@@ -235,6 +263,7 @@ class IdeationEngine:
             }
             flow = [ModuleCallStep("plan"), ActionStep(f"sort {dataset_name} by {key_name} descending and return the top 3"), EmitStep("result")]
         else:
+            strategy = "generic_fallback"
             primary = next(iter(inputs.keys()), "input")
             modules = {
                 "plan": ModuleSpec(
@@ -245,16 +274,19 @@ class IdeationEngine:
             }
             flow = [ModuleCallStep("plan"), EmitStep(primary if primary != "input" else "result")]
 
-        return ProgramSpec(
-            name=program_name,
-            intent=_normalize_sentence(idea),
-            inputs=inputs,
-            outputs=outputs,
-            constraints=constraints,
-            objects=objects,
-            modules=modules,
-            project=project,
-            flow=flow,
+        return (
+            ProgramSpec(
+                name=program_name,
+                intent=_normalize_sentence(idea),
+                inputs=inputs,
+                outputs=outputs,
+                constraints=constraints,
+                objects=objects,
+                modules=modules,
+                project=project,
+                flow=flow,
+            ),
+            strategy,
         )
 
 

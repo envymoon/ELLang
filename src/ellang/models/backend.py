@@ -55,6 +55,9 @@ class LocalModelBackend(Protocol):
     def plan_typed_program(self, spec: ProgramSpec) -> BackendResult:
         ...
 
+    def generate_ell_program(self, idea: str, bindings: dict[str, Any] | None = None) -> str | None:
+        ...
+
 
 @dataclass(slots=True)
 class QwenBackendConfig:
@@ -230,6 +233,40 @@ class QwenLocalBackend:
             diagnostics.append(f"Local backend detail: {self._load_error}")
         return BackendResult(typed_program_payload=payload, diagnostics=diagnostics)
 
+    def generate_ell_program(self, idea: str, bindings: dict[str, Any] | None = None) -> str | None:
+        bindings = bindings or {}
+        prompt = self._ell_generation_prompt(idea, bindings)
+        bundle = self._get_model_bundle()
+        if bundle is None:
+            return None
+        tokenizer, model = bundle
+        messages = [
+            {"role": "system", "content": "You generate only valid ELLang source code. Do not explain. Do not wrap in markdown unless necessary."},
+            {"role": "user", "content": prompt},
+        ]
+        try:
+            inputs = tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=True,
+                return_tensors="pt",
+                return_dict=True,
+            )
+            inputs = inputs.to(model.device)
+            generated = model.generate(
+                **inputs,
+                max_new_tokens=max(self.config.max_new_tokens, 512),
+                do_sample=False,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p,
+            )
+            prompt_len = inputs["input_ids"].shape[-1]
+            text = tokenizer.decode(generated[0][prompt_len:], skip_special_tokens=True)
+            return _extract_ell_source(text)
+        except Exception as exc:  # pragma: no cover
+            self._load_error = str(exc)
+            return None
+
     def _classify_intent(self, spec: ProgramSpec) -> IntentPlan | None:
         prompt = self._classification_prompt(spec)
         parsed = self._infer_json(prompt)
@@ -271,6 +308,37 @@ class QwenLocalBackend:
             f"Inputs: {json.dumps(spec.inputs, ensure_ascii=False)}\n"
             f"Outputs: {json.dumps(spec.outputs, ensure_ascii=False)}\n"
             f"Constraints: {json.dumps(spec.constraints, ensure_ascii=False)}\n"
+        )
+
+    def _ell_generation_prompt(self, idea: str, bindings: dict[str, Any]) -> str:
+        inferred_inputs = {key: _binding_type(value) for key, value in bindings.items()}
+        return (
+            "Generate a valid ELLang program only.\n"
+            "Use this grammar style:\n"
+            'program "name"\n'
+            'intent "..." \n'
+            "input name: type\n"
+            "output result: type\n"
+            "constraint deterministic = true\n"
+            "module Name(args):\n"
+            '  intent "..." \n'
+            '  use "..." \n'
+            "  call other(arg)\n"
+            "  set x = expr\n"
+            "  append expr to target\n"
+            "  remove last(target)\n"
+            "  return expr\n"
+            "flow:\n"
+            "  ...\n"
+            "Rules:\n"
+            "- Output ELLang source only.\n"
+            "- Use legal indentation with 2 spaces.\n"
+            "- Prefer structured steps over plain use strings when possible.\n"
+            "- If the task matches a known algorithm family, include project: algorithm_family and algorithm_task.\n"
+            "- Always include an output named result.\n"
+            f"Idea: {idea}\n"
+            f"Bindings: {json.dumps(bindings, ensure_ascii=False)}\n"
+            f"Inferred input types: {json.dumps(inferred_inputs, ensure_ascii=False)}\n"
         )
 
     def _infer_json(self, prompt: str) -> dict[str, Any] | None:
@@ -361,6 +429,17 @@ def _extract_json_object(text: str) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_ell_source(text: str) -> str | None:
+    fenced = re.search(r"```(?:text)?\s*(program .*?)```", text, flags=re.DOTALL | re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1).strip()
+        return candidate + "\n"
+    direct = re.search(r"(program\s+\".*)", text, flags=re.DOTALL)
+    if direct:
+        return direct.group(1).strip() + "\n"
+    return None
 
 
 def describe_model_profile(profile: str = "consumer") -> dict[str, object]:
@@ -764,3 +843,19 @@ def _normalize_parameters(spec: ProgramSpec, parameters: dict[str, Any]) -> dict
     if normalized.get("expression") is None:
         normalized["expression"] = "item"
     return normalized
+
+
+def _binding_type(value: Any) -> str:
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "dataset" if value and isinstance(value[0], dict) else "list"
+    if isinstance(value, dict):
+        return "record"
+    return "any"
