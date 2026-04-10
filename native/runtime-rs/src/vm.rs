@@ -604,7 +604,20 @@ fn execute_algorithm_family(operand: &Value, bindings: &Bindings) -> Result<Valu
     match (family, task) {
         ("array_manipulation", "rotate_array") => Ok(execute_rotate_array(bindings)),
         ("array_manipulation", "binary_search") => Ok(execute_binary_search(bindings)),
+        ("array_manipulation", "sum_elements") => Ok(execute_sum_elements(bindings)),
+        ("array_manipulation", "average_elements") => Ok(execute_average_elements(bindings)),
+        ("array_manipulation", "contains_element") => Ok(execute_contains_element(bindings)),
+        ("array_manipulation", "deduplicate") => Ok(execute_deduplicate(bindings)),
+        ("array_manipulation", "first_element") => Ok(execute_first_element(bindings)),
+        ("array_manipulation", "last_element") => Ok(execute_last_element(bindings)),
+        ("array_manipulation", "min_element") => Ok(execute_min_element(bindings)),
+        ("array_manipulation", "max_element") => Ok(execute_max_element(bindings)),
+        ("array_manipulation", "argmin_element") => Ok(execute_argmin_element(bindings)),
+        ("array_manipulation", "argmax_element") => Ok(execute_argmax_element(bindings)),
         ("array_manipulation", "max_subarray") => Ok(execute_max_subarray(bindings)),
+        ("array_manipulation", "prefix_sum") => Ok(execute_prefix_sum(bindings)),
+        ("array_manipulation", "window_min") => Ok(execute_window_min(bindings)),
+        ("array_manipulation", "window_max") => Ok(execute_window_max(bindings)),
         ("array_manipulation", "product_except_self") => Ok(execute_product_except_self(bindings)),
         ("array_two_pointers", "three_sum") => Ok(execute_three_sum(bindings)),
         ("hashmap_counting", "group_anagrams") => Ok(execute_group_anagrams(bindings)),
@@ -788,15 +801,72 @@ fn execute_binary_search(bindings: &Bindings) -> Value {
     Value::Number((-1).into())
 }
 
-fn execute_max_subarray(bindings: &Bindings) -> Value {
-    let nums = bindings
+fn numeric_values(bindings: &Bindings) -> Vec<i64> {
+    bindings
         .get("nums")
+        .or_else(|| bindings.get("elements"))
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|value| value.as_i64())
-        .collect::<Vec<_>>();
+        .collect::<Vec<_>>()
+}
+
+fn generic_values(bindings: &Bindings) -> Vec<Value> {
+    bindings
+        .get("nums")
+        .or_else(|| bindings.get("elements"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn execute_sum_elements(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    Value::Number(values.into_iter().sum::<i64>().into())
+}
+
+fn execute_average_elements(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    if values.is_empty() {
+        return Value::Number(0.into());
+    }
+    let sum = values.iter().sum::<i64>() as f64;
+    let mean = sum / values.len() as f64;
+    json!(mean)
+}
+
+fn execute_contains_element(bindings: &Bindings) -> Value {
+    let values = generic_values(bindings);
+    let target = bindings.get("target").or_else(|| bindings.get("value")).cloned().unwrap_or(Value::Null);
+    Value::Bool(values.iter().any(|value| value == &target))
+}
+
+fn execute_deduplicate(bindings: &Bindings) -> Value {
+    let values = generic_values(bindings);
+    let mut seen: Vec<String> = Vec::new();
+    let mut result: Vec<Value> = Vec::new();
+    for value in values {
+        let key = value.to_string();
+        if !seen.iter().any(|item| item == &key) {
+            seen.push(key);
+            result.push(value);
+        }
+    }
+    Value::Array(result)
+}
+
+fn execute_first_element(bindings: &Bindings) -> Value {
+    generic_values(bindings).into_iter().next().unwrap_or(Value::Null)
+}
+
+fn execute_last_element(bindings: &Bindings) -> Value {
+    generic_values(bindings).into_iter().last().unwrap_or(Value::Null)
+}
+
+fn execute_max_subarray(bindings: &Bindings) -> Value {
+    let nums = numeric_values(bindings);
     if nums.is_empty() {
         return Value::Number(0.into());
     }
@@ -809,15 +879,98 @@ fn execute_max_subarray(bindings: &Bindings) -> Value {
     Value::Number(best.into())
 }
 
+fn execute_min_element(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    match values.into_iter().min() {
+        Some(value) => Value::Number(value.into()),
+        None => Value::Null,
+    }
+}
+
+fn execute_max_element(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    match values.into_iter().max() {
+        Some(value) => Value::Number(value.into()),
+        None => Value::Null,
+    }
+}
+
+fn execute_argmin_element(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    if values.is_empty() {
+        return Value::Null;
+    }
+    let mut best_index = 0usize;
+    for index in 1..values.len() {
+        if values[index] < values[best_index] {
+            best_index = index;
+        }
+    }
+    Value::Number((best_index as i64).into())
+}
+
+fn execute_argmax_element(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    if values.is_empty() {
+        return Value::Null;
+    }
+    let mut best_index = 0usize;
+    for index in 1..values.len() {
+        if values[index] > values[best_index] {
+            best_index = index;
+        }
+    }
+    Value::Number((best_index as i64).into())
+}
+
+fn execute_prefix_sum(bindings: &Bindings) -> Value {
+    let values = numeric_values(bindings);
+    let mut running = 0i64;
+    Value::Array(
+        values
+            .into_iter()
+            .map(|value| {
+                running += value;
+                Value::Number(running.into())
+            })
+            .collect(),
+    )
+}
+
+fn execute_window_min(bindings: &Bindings) -> Value {
+    execute_window_reduce(bindings, true)
+}
+
+fn execute_window_max(bindings: &Bindings) -> Value {
+    execute_window_reduce(bindings, false)
+}
+
+fn execute_window_reduce(bindings: &Bindings, use_min: bool) -> Value {
+    let values = numeric_values(bindings);
+    let window = bindings
+        .get("k")
+        .or_else(|| bindings.get("window"))
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
+        .max(0) as usize;
+    if values.is_empty() || window == 0 || window > values.len() {
+        return Value::Array(Vec::new());
+    }
+    let mut result: Vec<Value> = Vec::new();
+    for start in 0..=(values.len() - window) {
+        let slice = &values[start..start + window];
+        let value = if use_min {
+            slice.iter().min().copied().unwrap_or(0)
+        } else {
+            slice.iter().max().copied().unwrap_or(0)
+        };
+        result.push(Value::Number(value.into()));
+    }
+    Value::Array(result)
+}
+
 fn execute_product_except_self(bindings: &Bindings) -> Value {
-    let nums = bindings
-        .get("nums")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|value| value.as_i64())
-        .collect::<Vec<_>>();
+    let nums = numeric_values(bindings);
     if nums.is_empty() {
         return Value::Array(Vec::new());
     }

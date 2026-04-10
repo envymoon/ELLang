@@ -108,6 +108,115 @@ def _product_except_self(bindings: dict[str, Any]) -> list[int]:
     return [prefix[index] * suffix[index] for index in range(len(nums))]
 
 
+def _sum_elements(bindings: dict[str, Any]) -> int | float:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return 0
+    return sum(values)
+
+
+def _average_elements(bindings: dict[str, Any]) -> float:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
+def _contains_element(bindings: dict[str, Any]) -> bool:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    target = bindings.get("target", bindings.get("value"))
+    return target in values
+
+
+def _deduplicate(bindings: dict[str, Any]) -> list[Any]:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    seen: set[Any] = set()
+    result: list[Any] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _first_element(bindings: dict[str, Any]) -> Any:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    return values[0] if values else None
+
+
+def _last_element(bindings: dict[str, Any]) -> Any:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    return values[-1] if values else None
+
+
+def _min_element(bindings: dict[str, Any]) -> Any:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return None
+    return min(values)
+
+
+def _max_element(bindings: dict[str, Any]) -> Any:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return None
+    return max(values)
+
+
+def _argmin_element(bindings: dict[str, Any]) -> int | None:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return None
+    best_index = 0
+    for index in range(1, len(values)):
+        if values[index] < values[best_index]:
+            best_index = index
+    return best_index
+
+
+def _argmax_element(bindings: dict[str, Any]) -> int | None:
+    values = list(bindings.get("nums", bindings.get("elements", [])))
+    if not values:
+        return None
+    best_index = 0
+    for index in range(1, len(values)):
+        if values[index] > values[best_index]:
+            best_index = index
+    return best_index
+
+
+def _prefix_sum(bindings: dict[str, Any]) -> list[int]:
+    values = [int(item) for item in bindings.get("nums", bindings.get("elements", []))]
+    running = 0
+    result: list[int] = []
+    for value in values:
+        running += value
+        result.append(running)
+    return result
+
+
+def _window_min(bindings: dict[str, Any]) -> list[int]:
+    values = [int(item) for item in bindings.get("nums", bindings.get("elements", []))]
+    window = int(bindings.get("k", bindings.get("window", 0)))
+    if not values or window <= 0 or window > len(values):
+        return []
+    result: list[int] = []
+    for start in range(0, len(values) - window + 1):
+        result.append(min(values[start : start + window]))
+    return result
+
+
+def _window_max(bindings: dict[str, Any]) -> list[int]:
+    values = [int(item) for item in bindings.get("nums", bindings.get("elements", []))]
+    window = int(bindings.get("k", bindings.get("window", 0)))
+    if not values or window <= 0 or window > len(values):
+        return []
+    result: list[int] = []
+    for start in range(0, len(values) - window + 1):
+        result.append(max(values[start : start + window]))
+    return result
+
+
 def _group_anagrams(bindings: dict[str, Any]) -> list[list[str]]:
     words = [str(item) for item in bindings.get("words", [])]
     groups: dict[tuple[str, ...], list[str]] = defaultdict(list)
@@ -242,6 +351,19 @@ REGISTRY.update(
         ("array_manipulation", "binary_search"): _binary_search,
         ("array_manipulation", "max_subarray"): _max_subarray,
         ("array_manipulation", "product_except_self"): _product_except_self,
+        ("array_manipulation", "sum_elements"): _sum_elements,
+        ("array_manipulation", "average_elements"): _average_elements,
+        ("array_manipulation", "contains_element"): _contains_element,
+        ("array_manipulation", "deduplicate"): _deduplicate,
+        ("array_manipulation", "first_element"): _first_element,
+        ("array_manipulation", "last_element"): _last_element,
+        ("array_manipulation", "min_element"): _min_element,
+        ("array_manipulation", "max_element"): _max_element,
+        ("array_manipulation", "argmin_element"): _argmin_element,
+        ("array_manipulation", "argmax_element"): _argmax_element,
+        ("array_manipulation", "prefix_sum"): _prefix_sum,
+        ("array_manipulation", "window_min"): _window_min,
+        ("array_manipulation", "window_max"): _window_max,
         ("array_two_pointers", "three_sum"): _three_sum,
         ("hashmap_counting", "group_anagrams"): _group_anagrams,
         ("hashmap_counting", "most_frequent_element"): _most_frequent_element,

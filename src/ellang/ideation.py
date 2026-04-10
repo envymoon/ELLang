@@ -250,6 +250,67 @@ class IdeationEngine:
             strategy = "matched_family"
             project = {"algorithm_family": "array_manipulation", "algorithm_task": "binary_search"}
             flow = [EmitStep("result")]
+        elif any(token in lower for token in ("argmin", "index of the smallest", "index of the minimum", "position of the smallest", "position of the minimum")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "argmin_element"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("argmax", "index of the largest", "index of the maximum", "position of the largest", "position of the maximum")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "argmax_element"}
+            flow = [EmitStep("result")]
+        elif "prefix sum" in lower:
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "prefix_sum"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("window minimum", "sliding window minimum", "window min")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "window_min"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("window maximum", "sliding window maximum", "window max")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "window_max"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("sum of", "sum the", "total of", "sum all")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "sum_elements"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("average", "mean")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "average_elements"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("contains", "include", "exists in")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "contains_element"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("deduplicate", "remove duplicates", "unique elements", "distinct elements")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "deduplicate"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("first element", "first number", "first item", "first value")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "first_element"}
+            flow = [EmitStep("result")]
+        elif any(token in lower for token in ("last element", "last number", "last item", "last value")):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "last_element"}
+            flow = [EmitStep("result")]
+        elif (
+            any(token in lower for token in ("smallest", "minimum", "smallest number", "minimum element", "smallest element"))
+            and "coin change" not in lower
+            and "subarray" not in lower
+            and any(token in lower for token in ("list", "array", "nums", "elements", "number"))
+        ):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "min_element"}
+            flow = [EmitStep("result")]
+        elif (
+            any(token in lower for token in ("largest", "maximum", "largest number", "maximum element", "largest element"))
+            and "subarray" not in lower
+            and any(token in lower for token in ("list", "array", "nums", "elements", "number"))
+        ):
+            strategy = "matched_family"
+            project = {"algorithm_family": "array_manipulation", "algorithm_task": "max_element"}
+            flow = [EmitStep("result")]
         elif "max subarray" in lower or "maximum subarray" in lower:
             strategy = "matched_family"
             project = {"algorithm_family": "array_manipulation", "algorithm_task": "max_subarray"}
@@ -546,7 +607,13 @@ def _infer_output_type(idea: str) -> str:
         if "right side view" in lower:
             return "list"
         return "int"
-    if any(token in lower for token in ("rotate the array", "rotate array", "product except self")):
+    if any(token in lower for token in ("contains", "include", "exists in")):
+        return "bool"
+    if any(token in lower for token in ("sum of", "sum the", "total of", "sum all", "average", "mean", "argmin", "argmax", "index of the smallest", "index of the largest", "position of the smallest", "position of the largest")):
+        return "int"
+    if any(token in lower for token in ("smallest", "minimum", "largest", "maximum")) and "subarray" not in lower:
+        return "int"
+    if any(token in lower for token in ("rotate the array", "rotate array", "product except self", "deduplicate", "remove duplicates", "unique elements", "prefix sum", "window minimum", "window maximum", "sliding window minimum", "sliding window maximum")):
         return "list"
     if any(token in lower for token in ("binary search", "max subarray", "maximum subarray")):
         return "int"
@@ -685,6 +752,12 @@ def _diagnose_execution_mismatch(spec: ProgramSpec, bindings: dict[str, Any], va
     lower = spec.intent.lower()
     if value == primary_value and any(token in lower for token in ("count", "frequency", "most frequent", "group", "sort", "top", "sum", "minimum", "maximum", "triplet", "indices")):
         diagnostics.append("Mismatch diagnosis: execution echoed the primary input instead of producing a transformed result.")
+    if any(token in lower for token in ("smallest", "minimum", "largest", "maximum")) and isinstance(value, list):
+        diagnostics.append("Mismatch diagnosis: scalar min/max style prompt returned a list instead of a scalar value.")
+    if any(token in lower for token in ("smallest", "minimum")) and isinstance(primary_value, list) and primary_value and value != min(primary_value):
+        diagnostics.append("Mismatch diagnosis: minimum-style prompt did not produce the minimum element from the sample input.")
+    if any(token in lower for token in ("largest", "maximum")) and "subarray" not in lower and isinstance(primary_value, list) and primary_value and value != max(primary_value):
+        diagnostics.append("Mismatch diagnosis: maximum-style prompt did not produce the maximum element from the sample input.")
     if isinstance(value, dict) and value.get("status") == "error":
         diagnostics.append(f"Mismatch diagnosis: runtime returned an intrinsic error: {value.get('message', 'unknown error')}.")
     if "most frequent" in lower and isinstance(primary_value, list) and value not in primary_value:

@@ -498,6 +498,24 @@ class CoreRuntimeTests(unittest.TestCase):
         result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [-1, 0, 3, 5, 9, 12], "target": 9})
         self.assertEqual(result.value, 4)
 
+    def test_algorithm_family_min_element(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "find the smallest number in the list",
+            {"nums": [1, 2, 3, 4, 5, 6, 7, 5, 4, 1, 0]},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4, 5, 6, 7, 5, 4, 1, 0]})
+        self.assertEqual(result.value, 0)
+
+    def test_algorithm_family_max_element(self) -> None:
+        drafted = IdeationEngine().ideate(
+            "find the largest number in the list",
+            {"nums": [1, 2, 3, 4, 5, 6, 7, 5, 4, 1, 0]},
+        )
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4, 5, 6, 7, 5, 4, 1, 0]})
+        self.assertEqual(result.value, 7)
+
     def test_algorithm_family_product_except_self(self) -> None:
         drafted = IdeationEngine().ideate(
             "Return the product of array except self for each index.",
@@ -506,6 +524,69 @@ class CoreRuntimeTests(unittest.TestCase):
         plan = Compiler().compile(parse_rendered_program(drafted.source))
         result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4]})
         self.assertEqual(result.value, [24, 12, 8, 6])
+
+    def test_algorithm_family_sum_elements(self) -> None:
+        drafted = IdeationEngine().ideate("find the sum of all numbers in the list", {"nums": [1, 2, 3, 4]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4]})
+        self.assertEqual(result.value, 10)
+
+    def test_algorithm_family_average_elements(self) -> None:
+        drafted = IdeationEngine().ideate("find the average of the numbers in the list", {"nums": [1, 2, 3, 4]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4]})
+        self.assertEqual(result.value, 2.5)
+
+    def test_algorithm_family_contains_element(self) -> None:
+        drafted = IdeationEngine().ideate("check whether the list contains the target value", {"nums": [1, 2, 3, 4], "target": 3})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4], "target": 3})
+        self.assertTrue(result.value)
+
+    def test_algorithm_family_deduplicate(self) -> None:
+        drafted = IdeationEngine().ideate("remove duplicates from the list", {"nums": [1, 2, 2, 3, 1, 4]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 2, 3, 1, 4]})
+        self.assertEqual(result.value, [1, 2, 3, 4])
+
+    def test_algorithm_family_first_and_last(self) -> None:
+        drafted_first = IdeationEngine().ideate("return the first element in the list", {"nums": [9, 8, 7]})
+        plan_first = Compiler().compile(parse_rendered_program(drafted_first.source))
+        result_first = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_first, {"nums": [9, 8, 7]})
+        self.assertEqual(result_first.value, 9)
+
+        drafted_last = IdeationEngine().ideate("return the last element in the list", {"nums": [9, 8, 7]})
+        plan_last = Compiler().compile(parse_rendered_program(drafted_last.source))
+        result_last = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_last, {"nums": [9, 8, 7]})
+        self.assertEqual(result_last.value, 7)
+
+    def test_algorithm_family_argmin_argmax(self) -> None:
+        drafted_argmin = IdeationEngine().ideate("return the index of the smallest number in the list", {"nums": [5, 2, 9, 1, 7]})
+        plan_argmin = Compiler().compile(parse_rendered_program(drafted_argmin.source))
+        result_argmin = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_argmin, {"nums": [5, 2, 9, 1, 7]})
+        self.assertEqual(result_argmin.value, 3)
+
+        drafted_argmax = IdeationEngine().ideate("return the index of the largest number in the list", {"nums": [5, 2, 9, 1, 7]})
+        plan_argmax = Compiler().compile(parse_rendered_program(drafted_argmax.source))
+        result_argmax = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_argmax, {"nums": [5, 2, 9, 1, 7]})
+        self.assertEqual(result_argmax.value, 2)
+
+    def test_algorithm_family_prefix_sum(self) -> None:
+        drafted = IdeationEngine().ideate("compute the prefix sum of the array", {"nums": [1, 2, 3, 4]})
+        plan = Compiler().compile(parse_rendered_program(drafted.source))
+        result = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan, {"nums": [1, 2, 3, 4]})
+        self.assertEqual(result.value, [1, 3, 6, 10])
+
+    def test_algorithm_family_window_min_max(self) -> None:
+        drafted_min = IdeationEngine().ideate("compute the sliding window minimum with window size k", {"nums": [4, 2, 12, 3, 5, 1], "k": 3})
+        plan_min = Compiler().compile(parse_rendered_program(drafted_min.source))
+        result_min = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_min, {"nums": [4, 2, 12, 3, 5, 1], "k": 3})
+        self.assertEqual(result_min.value, [2, 2, 3, 1])
+
+        drafted_max = IdeationEngine().ideate("compute the sliding window maximum with window size k", {"nums": [4, 2, 12, 3, 5, 1], "k": 3})
+        plan_max = Compiler().compile(parse_rendered_program(drafted_max.source))
+        result_max = ExecutionEngine(workspace_root=str(REPO_ROOT)).execute(plan_max, {"nums": [4, 2, 12, 3, 5, 1], "k": 3})
+        self.assertEqual(result_max.value, [12, 12, 12, 5])
 
     def test_algorithm_family_hashmap_counting(self) -> None:
         drafted = IdeationEngine().ideate("Group the anagrams together.", {"words": ["eat", "tea", "tan", "ate", "nat", "bat"]})
