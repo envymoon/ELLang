@@ -10,6 +10,7 @@ from typing import Any
 from .compiler import Compiler
 from .algorithm_families import is_supported_algorithm_task
 from .models import QwenLocalBackend
+from .output import is_error_result, print_error, print_result
 from .problem_spec import ProblemExample, ProblemSpec
 from .runtime import ExecutionEngine
 from .syntax import (
@@ -421,13 +422,18 @@ class IdeationEngine:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("Usage: python -m ellang.ideate \"<natural idea>\" [bindings.json] [--show-ell] [--write-ell path]")
+        print('Usage: python -m ellang.ideate "<natural idea>" [bindings.json]')
+        print('       python -m ellang.ideate "<natural idea>" --bind-json "{...}"')
+        print('       python -m ellang.ideate "<natural idea>" --bind key=value [--bind key=value ...]')
+        print('       python -m ellang.ideate "<natural idea>" --extend')
+        print('       ellang-ideate "<natural idea>" [bindings.json]')
         return 1
 
     args = sys.argv[1:]
     idea = args[0]
     bindings: dict[str, Any] = {}
     show_ell = False
+    extend = False
     write_path: Path | None = None
 
     index = 1
@@ -437,10 +443,27 @@ def main() -> int:
             show_ell = True
             index += 1
             continue
+        if item == "--extend":
+            extend = True
+            index += 1
+            continue
         if item == "--write-ell":
             if index + 1 >= len(args):
                 raise SystemExit("--write-ell requires a target path.")
             write_path = Path(args[index + 1])
+            index += 2
+            continue
+        if item == "--bind-json":
+            if index + 1 >= len(args):
+                raise SystemExit("--bind-json requires an inline JSON object.")
+            bindings = json.loads(args[index + 1])
+            index += 2
+            continue
+        if item == "--bind":
+            if index + 1 >= len(args):
+                raise SystemExit("--bind requires key=value.")
+            key, value = _parse_inline_binding(args[index + 1])
+            bindings[key] = value
             index += 2
             continue
         bindings = json.loads(Path(item).read_text(encoding="utf-8"))
@@ -453,25 +476,31 @@ def main() -> int:
 
     plan = Compiler().compile(drafted.spec)
     result = ExecutionEngine().execute(plan, bindings or {})
-    payload = {
-        "idea": idea,
-        "program": drafted.spec.name,
-        "problem_spec": asdict(drafted.problem_spec),
-        "ell_source": drafted.source if show_ell or write_path is None else str(write_path),
-        "ideation_diagnostics": drafted.diagnostics,
-        "diagnostics": result.diagnostics,
-        "result": result.value,
-        "suggested_tests": plan.suggested_tests,
-        "debug_report": asdict(result.debug_report) if result.debug_report else None,
-        "typed_ir_nodes": len(plan.typed_program.nodes) if plan.typed_program else 0,
-        "bytecode_instructions": len(plan.bytecode.instructions) if plan.bytecode else 0,
-        "vm_backend": result.vm_backend,
-        "replay": result.replay,
-        "backend_prototypes": plan.backend_prototypes,
-        "flowchart": mermaid_flowchart(plan),
-        "tracechart": mermaid_trace(result.trace) if result.trace else "",
-    }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if is_error_result(result.value) and not extend:
+        print_error(result.value)
+        return 1
+    if extend:
+        payload = {
+            "idea": idea,
+            "program": drafted.spec.name,
+            "problem_spec": asdict(drafted.problem_spec),
+            "ell_source": drafted.source if show_ell or write_path is None else str(write_path),
+            "ideation_diagnostics": drafted.diagnostics,
+            "diagnostics": result.diagnostics,
+            "result": result.value,
+            "suggested_tests": plan.suggested_tests,
+            "debug_report": asdict(result.debug_report) if result.debug_report else None,
+            "typed_ir_nodes": len(plan.typed_program.nodes) if plan.typed_program else 0,
+            "bytecode_instructions": len(plan.bytecode.instructions) if plan.bytecode else 0,
+            "vm_backend": result.vm_backend,
+            "replay": result.replay,
+            "backend_prototypes": plan.backend_prototypes,
+            "flowchart": mermaid_flowchart(plan),
+            "tracechart": mermaid_trace(result.trace) if result.trace else "",
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print_result(result.value)
     return 0
 
 
@@ -538,6 +567,33 @@ def _slug_to_program_name(idea: str) -> str:
 def _normalize_sentence(text: str) -> str:
     normalized = " ".join(text.strip().split())
     return normalized[0].upper() + normalized[1:] if normalized else "Generated program"
+
+
+def _parse_inline_binding(payload: str) -> tuple[str, Any]:
+    if "=" not in payload:
+        raise SystemExit(f"Inline binding must look like key=value, got: {payload}")
+    key, raw = payload.split("=", 1)
+    key = key.strip()
+    raw = raw.strip()
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        lowered = raw.lower()
+        if lowered == "true":
+            value = True
+        elif lowered == "false":
+            value = False
+        elif lowered == "null":
+            value = None
+        else:
+            try:
+                value = int(raw)
+            except ValueError:
+                try:
+                    value = float(raw)
+                except ValueError:
+                    value = raw
+    return key, value
 
 
 def _infer_problem_type(idea: str, project: dict[str, str]) -> str:

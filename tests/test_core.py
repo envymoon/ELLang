@@ -1,8 +1,11 @@
 import unittest
 from pathlib import Path
+from io import StringIO
+from unittest.mock import patch
 
 from ellang.bytecode import BytecodeProgram, Instruction, OpCode
 from ellang.cache import TypedIRCache
+from ellang.cli import main as cli_main
 from ellang.compiler import Compiler
 from ellang.ideation import IdeationEngine
 from ellang.models import QwenBackendConfig, QwenLocalBackend
@@ -98,6 +101,49 @@ class RepairingIdeationBackend:
 
 
 class CoreRuntimeTests(unittest.TestCase):
+    def test_cli_supports_natural_language_product_command(self) -> None:
+        with patch(
+            "sys.argv",
+            [
+                "ellang",
+                "Given an integer array nums, rotate the array to the right by k steps, where k is non-negative.",
+                "--bind",
+                "nums=[1,2,3,4,5,6,7]",
+                "--bind",
+                "k=3",
+            ],
+        ), patch("sys.stdout", new_callable=StringIO) as stdout:
+            exit_code = cli_main()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("[", stdout.getvalue())
+        self.assertIn("5", stdout.getvalue())
+
+    def test_cli_error_output_is_compact_without_extend(self) -> None:
+        missing_program = REPO_ROOT / "examples" / "unsupported_family.ell"
+        missing_program.write_text(
+            (
+                'program "unsupported_family"\n'
+                'intent "Unsupported intrinsic"\n\n'
+                "input nums: list\n"
+                "output result: list\n\n"
+                "constraint deterministic = true\n\n"
+                "project:\n"
+                "  algorithm_family: unsupported_family\n"
+                "  algorithm_task: imaginary_task\n\n"
+                "flow:\n"
+                "  emit result\n"
+            ),
+            encoding="utf-8",
+        )
+        try:
+            with patch("sys.argv", ["ellang", str(missing_program)]), patch("sys.stdout", new_callable=StringIO) as stdout:
+                exit_code = cli_main()
+        finally:
+            missing_program.unlink(missing_ok=True)
+        self.assertEqual(exit_code, 1)
+        self.assertIn("Error:", stdout.getvalue())
+        self.assertIn("--extend", stdout.getvalue())
+
     def test_parse_compile_execute_sort(self) -> None:
         spec = parse_program(
             """

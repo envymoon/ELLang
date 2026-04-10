@@ -171,11 +171,43 @@ The Python runtime automatically uses the native VM when the built executable is
 python -m ellang.cli examples/select_top_students.ell examples/students.json
 ```
 
+The product-style command also supports natural-language execution directly:
+
+```bash
+ellang "rotate array right by k" --bind "nums=[1,2,3,4,5,6,7]" --bind "k=3"
+```
+
 ### Program from natural language
 
 ```bash
 python -m ellang.ideate "select the top 2 students by score" examples/students.json --show-ell
 ```
+
+You can also run the installed short entrypoint:
+
+```bash
+ellang-ideate "select the top 2 students by score" examples/students.json
+```
+
+Or pass bindings inline without writing a Python snippet:
+
+```bash
+ellang-ideate "Given an integer array nums, rotate the array to the right by k steps." --bind-json "{\"nums\":[1,2,3,4,5,6,7],\"k\":3}"
+```
+
+For PowerShell, the easiest form is repeated `--bind` flags:
+
+```powershell
+ellang-ideate "Given an integer array nums, rotate the array to the right by k steps." --bind "nums=[1,2,3,4,5,6,7]" --bind "k=3"
+```
+
+By default, `ellang-ideate` prints only the final execution result. Use `--extend` when you want the full compiled view, diagnostics, replay metadata, flowchart text, and debug payload.
+
+```powershell
+ellang-ideate "Given an integer array nums, rotate the array to the right by k steps." --bind "nums=[1,2,3,4,5,6,7]" --bind "k=3" --extend
+```
+
+The same `--extend` behavior is available on `ellang`. On failure, the default output is a compact error plus a reminder to rerun with `--extend`.
 
 ### Inspect local model discovery
 
